@@ -26,7 +26,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.log("Content script received getText request.");
         const text = extractPageText();
         if (text) {
-            currentPageText = text; // Store the extracted text
             sendResponse({ success: true, text: text });
         } else {
             console.error("Failed to extract text from the page.");
@@ -70,7 +69,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  let modalSummaryDiv = null;
  let modalSourcesUl = null;
  let modalLoadingDiv = null;
- let currentPageText = ''; // Variable to store the extracted text
 
  // --- Modal Management Functions ---
  function showModal(snippet, reason) {
@@ -231,18 +229,13 @@ function handleIconClick(event) {
     const snippet = icon.dataset.snippet;
     const reason = icon.dataset.reason;
 
-    if (snippet && reason && currentPageText) { // Ensure currentPageText is available
+    if (snippet && reason) {
         showModal(snippet, reason); // Show modal with initial info + loading
 
-        // Send message to background script to start verification, including full text
-        console.log("Sending snippet and full text to background for verification:", snippet);
+        // Send message to background script to start verification
+        console.log("Sending snippet to background for verification:", snippet);
         chrome.runtime.sendMessage(
-            {
-                action: "verifySnippet",
-                snippet: snippet,
-                reason: reason,
-                fullText: currentPageText // Add the full text here
-            },
+            { action: "verifySnippet", snippet: snippet, reason: reason },
             (response) => {
                 // Handle immediate errors from background (e.g., API key missing)
                 if (chrome.runtime.lastError) {
@@ -256,10 +249,7 @@ function handleIconClick(event) {
             }
         );
     } else {
-        console.error("Could not retrieve snippet/reason/fullText from icon data attributes or stored text.");
-        if (!currentPageText) {
-             updateModalContent("Error: Could not retrieve page text for verification. Please try analyzing the page again.", []);
-        }
+        console.error("Could not retrieve snippet/reason from icon data attributes.");
     }
 }
 
@@ -507,8 +497,7 @@ function extractPageText() {
         mainText = bodyClone.innerText;
     }
     mainText = mainText.replace(/(\s\s+|\n\n+)/g, '\n').trim();
-    // **Reduce max length slightly to leave room for prompt text in API call**
-    const MAX_LENGTH = 8000; // Reduced from 10000
+    const MAX_LENGTH = 10000;
     if (mainText.length > MAX_LENGTH) {
         mainText = mainText.substring(0, MAX_LENGTH) + "... (truncated)";
     }

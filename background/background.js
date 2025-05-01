@@ -50,8 +50,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 return true; // Still need to return true for async potential
             }
 
-            // Pass the fullText from the request to the verification function
-            verifySnippetWithSources(request.snippet, request.reason, request.fullText, apiKey)
+            verifySnippetWithSources(request.snippet, request.reason, apiKey)
                 .then(verificationData => {
                     console.log("[Background] Verification successful. Sending result to tab:", senderTabId, verificationData);
                     // Send the result specifically to the content script tab
@@ -209,26 +208,18 @@ console.log("Background script loaded (v5 - Verification Added).");
 
 
 // *** NEW: Function to verify a snippet and get sources ***
-// Updated signature to accept fullText
-async function verifySnippetWithSources(snippet, reason, fullText, apiKey) {
+async function verifySnippetWithSources(snippet, reason, apiKey) {
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
     // --- Prompt Engineering for Verification ---
-    // Ask for explanation and credible sources in JSON format, providing full text context.
-    const prompt = `Analyze the following situation:
-A user is reading a webpage and a specific snippet of text has been flagged as potentially problematic.
+    // Ask for explanation and credible sources in JSON format.
+    const prompt = `A piece of text was flagged with the following snippet and reason:
+Snippet: "${snippet}"
+Reason: "${reason}"
 
-**Full Text of the Webpage (or relevant portion):**
----
-${fullText}
----
-
-**Flagged Snippet:** "${snippet}"
-**Reason for Flag:** "${reason}"
-
-Please perform the following tasks based on the snippet, the reason, AND the context of the full text:
-1.  **Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic given the reason and its context within the full text.
-2.  **Find Sources:** Search the web for 1-3 highly credible and relevant sources (e.g., reputable news organizations, academic institutions, established fact-checking sites) that provide context, evidence, or counter-evidence related to the flagged snippet's claim or the explanation. Avoid opinion blogs or unreliable sources.
+Please perform the following tasks based *only* on the provided snippet and reason:
+1.  **Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic given the reason. Focus on explaining the reasoning itself.
+2.  **Find Sources:** Search the web for 3 highly credible and relevant sources (e.g., reputable news organizations, academic institutions, established fact-checking sites) that provide context or evidence related to the explanation. Avoid opinion blogs or unreliable sources.
 
 Provide your response strictly in the following JSON format:
 \`\`\`json
@@ -242,7 +233,7 @@ Provide your response strictly in the following JSON format:
 }
 \`\`\`
 
-**Crucially, prioritize finding 1-3 relevant and highly credible sources** (e.g., reputable news, academic sites, fact-checkers) that provide context or evidence related to the explanation. Return the URLs you find in the "sources" array. If, after searching, you genuinely cannot find any credible sources, explicitly state this in the "summary" field and return an empty "sources" array. Ensure the entire output is valid JSON.
+If you cannot find 3 credible sources, provide as many as you can find (minimum 1 if possible) and leave the remaining entries as empty strings (""). If you cannot provide a meaningful explanation or find any sources, return an empty summary and an empty sources array. Ensure the entire output is valid JSON.
 
 JSON Verification:`;
     // --- End Prompt Engineering ---
@@ -261,7 +252,7 @@ JSON Verification:`;
                     "maxOutputTokens": 500 // Adjust as needed
                 },
                  // Enable web search tool if available/needed for the model version
-                 "tools": [{ "google_search_retrieval": {} }] // Explicitly enable web search
+                 // "tools": [{ "google_search_retrieval": {} }] // Uncomment if using a model version that supports this tool explicitly
             })
         });
 
