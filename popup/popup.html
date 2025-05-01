@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MisinformShield</title>
+    <link rel="stylesheet" href="popup.css">
+    </head>
+<body>
+    <div class="container">
+        <h1>MisinformShield Analysis</h1>
+
+        <div class="api-key-section">
+            <label for="apiKey">Gemini API Key:</label>
+            <input type="password" id="apiKey" placeholder="Paste your key here">
+            <button id="saveApiKey">Save Key</button>
+            <p id="apiKeyStatus" class="status"></p>
+        </div>
+        <hr>
+
+        <button id="analyzeButton">Analyze Page Content</button>
+        <div id="loadingIndicator" style="display: none;">Analyzing...</div>
+
+        <div id="results" style="display: none;"> <h2>Credibility Score:</h2>
+            <div id="scoreTextDisplay" class="score-text-display">-- / 100</div>
+            <div class="progress-bar-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+             <pre id="analysisRawText" style="display: none;"></pre>
+        </div>
+         <p id="error" class="error"></p>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
