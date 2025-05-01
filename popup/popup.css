@@ -18,6 +18,27 @@ h1 {
     text-align: center;
     margin-bottom: 10px;
 }
+.header-section {
+    display: flex;
+    justify-content: space-between; /* Pushes title and icon apart */
+    align-items: center; /* Vertically aligns title and icon */
+    margin-bottom: 10px; /* Space below header */
+}
+
+.icon-button {
+    background: none;
+    border: none;
+    font-size: 1.5em; /* Adjust icon size */
+    cursor: pointer;
+    padding: 0 5px; /* Minimal padding */
+    width: auto; /* Override default button width */
+    color: #555; /* Icon color */
+}
+
+.icon-button:hover {
+    color: #000; /* Darken icon on hover */
+    background: none; /* Ensure no background on hover */
+}
 
 h2 {
     font-size: 1em;

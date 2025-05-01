@@ -29,11 +29,58 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     sendResponse({ success: false, error: error.message || "Failed to fetch or process analysis from Gemini" });
                 });
         });
-        return true;
+        return true; // Keep channel open for async response
+    }
+    // *** NEW: Listener case for snippet verification ***
+    else if (request.action === "verifySnippet") {
+        chrome.storage.local.get(['geminiApiKey'], (result) => {
+            const apiKey = result.geminiApiKey;
+            if (!apiKey) {
+                console.error("Gemini API Key not found for verification.");
+                sendResponse({ success: false, error: "API Key not set." });
+                return true;
+            }
+
+            console.log(`[Background] Received verifySnippet for: "${request.snippet.substring(0, 50)}..."`);
+            // Get the tab ID from the sender
+            const senderTabId = sender.tab?.id;
+            if (!senderTabId) {
+                console.error("[Background] Could not get sender tab ID for verification result.");
+                sendResponse({ success: false, error: "Internal error: Missing sender tab ID." });
+                return true; // Still need to return true for async potential
+            }
+
+            // Pass the fullText from the request to the verification function
+            verifySnippetWithSources(request.snippet, request.reason, request.fullText, apiKey)
+                .then(verificationData => {
+                    console.log("[Background] Verification successful. Sending result to tab:", senderTabId, verificationData);
+                    // Send the result specifically to the content script tab
+                    chrome.tabs.sendMessage(senderTabId, {
+                        action: "verificationResult",
+                        success: true,
+                        ...verificationData
+                    });
+                    // Send a simple success response back to the original caller (handleIconClick)
+                    sendResponse({ success: true });
+                })
+                .catch(error => {
+                    console.error("[Background] Verification failed. Sending error result to tab:", senderTabId, error);
+                    // Send the error specifically to the content script tab
+                    chrome.tabs.sendMessage(senderTabId, {
+                        action: "verificationResult",
+                        success: false,
+                        error: error.message || "Failed to fetch or process verification from Gemini"
+                    });
+                    // Send a simple failure response back to the original caller (handleIconClick)
+                    sendResponse({ success: false, error: error.message || "Verification process failed." });
+                });
+        });
+        return true; // Keep channel open for async response
     }
 });
 
-// *** RENAMED and MODIFIED function for highlighting ***
+
+// *** Function for initial text analysis and highlighting flags ***
 async function callGeminiAPIForHighlighting(textToAnalyze, apiKey) {
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
@@ -158,4 +205,121 @@ JSON Analysis:`;
     }
 }
 
-console.log("Background script loaded (v4 - Highlighting).");
+console.log("Background script loaded (v5 - Verification Added).");
+
+
+// *** NEW: Function to verify a snippet and get sources ***
+// Updated signature to accept fullText
+async function verifySnippetWithSources(snippet, reason, fullText, apiKey) {
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+
+    // --- Prompt Engineering for Verification ---
+    // Ask for explanation and credible sources in JSON format, providing full text context.
+    const prompt = `Analyze the following situation:
+A user is reading a webpage and a specific snippet of text has been flagged as potentially problematic.
+
+**Full Text of the Webpage (or relevant portion):**
+---
+${fullText}
+---
+
+**Flagged Snippet:** "${snippet}"
+**Reason for Flag:** "${reason}"
+
+Please perform the following tasks based on the snippet, the reason, AND the context of the full text:
+1.  **Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic given the reason and its context within the full text.
+2.  **Find Sources:** Search the web for 1-3 highly credible and relevant sources (e.g., reputable news organizations, academic institutions, established fact-checking sites) that provide context, evidence, or counter-evidence related to the flagged snippet's claim or the explanation. Avoid opinion blogs or unreliable sources.
+
+Provide your response strictly in the following JSON format:
+\`\`\`json
+{
+  "summary": "Your 2-3 sentence explanation here.",
+  "sources": [
+    "URL of source 1",
+    "URL of source 2",
+    "URL of source 3"
+  ]
+}
+\`\`\`
+
+**Crucially, prioritize finding 1-3 relevant and highly credible sources** (e.g., reputable news, academic sites, fact-checkers) that provide context or evidence related to the explanation. Return the URLs you find in the "sources" array. If, after searching, you genuinely cannot find any credible sources, explicitly state this in the "summary" field and return an empty "sources" array. Ensure the entire output is valid JSON.
+
+JSON Verification:`;
+    // --- End Prompt Engineering ---
+
+    console.log(`Sending snippet to Gemini API for verification: "${snippet.substring(0, 50)}..."`);
+
+    try {
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                "contents": [{ "parts": [{ "text": prompt }] }],
+                "generationConfig": {
+                    "response_mime_type": "application/json", // Request JSON output
+                    "temperature": 0.4, // Slightly higher temp for more nuanced explanation
+                    "maxOutputTokens": 500 // Adjust as needed
+                },
+                 // Enable web search tool if available/needed for the model version
+                 "tools": [{ "google_search_retrieval": {} }] // Explicitly enable web search
+            })
+        });
+
+        if (!response.ok) {
+            let errorBodyText = await response.text();
+            console.error("API Verification Error Response Text:", errorBodyText);
+            let errorJson = {};
+            try { errorJson = JSON.parse(errorBodyText); } catch(e) { /* ignore */ }
+            const errorMessage = errorJson?.error?.message || errorBodyText || `API verification request failed with status ${response.status}`;
+            throw new Error(errorMessage);
+        }
+
+        const data = await response.json();
+        console.log("Raw Gemini Verification JSON Response Data:", data);
+
+        if (data.candidates && data.candidates.length > 0 &&
+            data.candidates[0].content && data.candidates[0].content.parts &&
+            data.candidates[0].content.parts.length > 0)
+        {
+            let jsonString = data.candidates[0].content.parts[0].text;
+            const jsonMatch = jsonString.match(/```json\s*([\s\S]*?)\s*```/);
+            if (jsonMatch && jsonMatch[1]) {
+                jsonString = jsonMatch[1];
+            }
+
+            try {
+                const verificationData = JSON.parse(jsonString);
+                console.log("Successfully parsed verification JSON from Gemini.");
+
+                // Basic validation
+                const summary = (verificationData && typeof verificationData.summary === 'string')
+                    ? verificationData.summary.trim()
+                    : "Could not generate explanation.";
+                const sources = (verificationData && Array.isArray(verificationData.sources))
+                    ? verificationData.sources.filter(s => typeof s === 'string' && s.trim().startsWith('http')) // Ensure they are strings and look like URLs
+                    : [];
+
+                console.log("Extracted Summary:", summary);
+                console.log("Extracted Sources:", sources);
+
+                return { summary, sources };
+
+            } catch (parseError) {
+                console.error("Failed to parse verification JSON response from Gemini:", parseError);
+                console.error("Received text:", jsonString);
+                throw new Error("Failed to parse verification JSON from API response.");
+            }
+
+        } else if (data.promptFeedback && data.promptFeedback.blockReason) {
+            console.error("Verification prompt blocked by Gemini:", data.promptFeedback.blockReason);
+            throw new Error(`Verification request blocked by API: ${data.promptFeedback.blockReason}.`);
+        } else {
+            console.error("Unexpected API verification response format:", data);
+            throw new Error("Unexpected response format from Gemini API during verification.");
+        }
+
+    } catch (error) {
+        console.error("Verification fetch or processing error:", error);
+        throw error; // Re-throw
+    }
+}

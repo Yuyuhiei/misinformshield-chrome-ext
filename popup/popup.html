@@ -8,15 +8,18 @@
     </head>
 <body>
     <div class="container">
-        <h1>MisinformShield Analysis</h1>
+        <div class="header-section">
+            <h1>MisinformShield Analysis</h1>
+            <button id="toggleApiKeyButton" class="icon-button" title="Manage API Key">🔑</button>
+        </div>
 
-        <div class="api-key-section">
+        <div id="apiKeyInputArea" class="api-key-section" style="display: none;">
             <label for="apiKey">Gemini API Key:</label>
             <input type="password" id="apiKey" placeholder="Paste your key here">
             <button id="saveApiKey">Save Key</button>
             <p id="apiKeyStatus" class="status"></p>
         </div>
-        <hr>
+        <hr id="apiKeySeparator" style="display: none;">
 
         <button id="analyzeButton">Analyze Page Content</button>
         <div id="loadingIndicator" style="display: none;">Analyzing...</div>

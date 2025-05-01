@@ -12,10 +12,79 @@ const progressBarDiv = document.getElementById('progressBar');
 const apiKeyInput = document.getElementById('apiKey');
 const saveApiKeyButton = document.getElementById('saveApiKey');
 const apiKeyStatus = document.getElementById('apiKeyStatus');
+const toggleApiKeyButton = document.getElementById('toggleApiKeyButton'); // New button
+const apiKeyInputArea = document.getElementById('apiKeyInputArea'); // The div containing the input/button
+const apiKeySeparator = document.getElementById('apiKeySeparator'); // The <hr> separator
 
-// --- API Key Handling --- (No changes)
-document.addEventListener('DOMContentLoaded', () => { /* ... */ });
-saveApiKeyButton.addEventListener('click', () => { /* ... */ });
+// --- API Key Handling ---
+document.addEventListener('DOMContentLoaded', () => {
+    // Check if API key exists and update status, but don't show input
+    chrome.storage.local.get(['geminiApiKey'], (result) => {
+        if (result.geminiApiKey) {
+            apiKeyStatus.textContent = 'API Key is set.';
+            apiKeyStatus.style.color = 'green';
+            analyzeButton.disabled = false; // Enable analyze button if key exists
+        } else {
+            apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
+            apiKeyStatus.style.color = '#e74c3c'; // Use error color
+            analyzeButton.disabled = true; // Disable analyze button if no key
+        }
+    });
+});
+
+saveApiKeyButton.addEventListener('click', () => {
+    const apiKey = apiKeyInput.value.trim();
+    if (apiKey) {
+        chrome.storage.local.set({ geminiApiKey: apiKey }, () => {
+            if (chrome.runtime.lastError) {
+                apiKeyStatus.textContent = `Error saving key: ${chrome.runtime.lastError.message}`;
+                apiKeyStatus.style.color = '#e74c3c';
+            } else {
+                apiKeyStatus.textContent = 'API Key saved successfully!';
+                apiKeyStatus.style.color = 'green';
+                apiKeyInput.value = ''; // Clear the input field
+                analyzeButton.disabled = false; // Enable analyze button
+                // Optionally hide the section after saving
+                // apiKeyInputArea.style.display = 'none';
+                // apiKeySeparator.style.display = 'none';
+            }
+        });
+    } else {
+        apiKeyStatus.textContent = 'Please enter an API Key.';
+        apiKeyStatus.style.color = '#e74c3c';
+    }
+});
+
+// Listener for the key icon button
+toggleApiKeyButton.addEventListener('click', () => {
+    const isHidden = apiKeyInputArea.style.display === 'none';
+    apiKeyInputArea.style.display = isHidden ? 'block' : 'none';
+    apiKeySeparator.style.display = isHidden ? 'block' : 'none';
+    // Update status message when showing the input area if no key is set
+    if (isHidden) {
+         chrome.storage.local.get(['geminiApiKey'], (result) => {
+            if (!result.geminiApiKey) {
+                 apiKeyStatus.textContent = 'Enter your Gemini API Key below.';
+                 apiKeyStatus.style.color = '#555'; // Neutral color
+            } else {
+                 // If key exists, maybe show a different message or keep the 'Key is set' message
+                 apiKeyStatus.textContent = 'API Key is set. You can update it below.';
+                 apiKeyStatus.style.color = 'green';
+            }
+         });
+    } else {
+         // When hiding, revert status based on whether key is actually saved
+         chrome.storage.local.get(['geminiApiKey'], (result) => {
+            if (result.geminiApiKey) {
+                apiKeyStatus.textContent = 'API Key is set.';
+                apiKeyStatus.style.color = 'green';
+            } else {
+                apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
+                apiKeyStatus.style.color = '#e74c3c';
+            }
+         });
+    }
+});
 // --- (End API Key Handling) ---
 
 
@@ -169,39 +238,4 @@ function clearResults() {
 
     // Clear previous highlights on the page
     sendHighlightRequestToContentScript(null);
-}
-
-function displayScoreBar(score) {
-    const numericScore = Math.max(0, Math.min(100, Number(score)));
-    resultsDiv.style.display = 'flex';
-    errorP.textContent = '';
-    scoreTextDisplayDiv.textContent = `${numericScore} / 100`;
-    let colorClass = 'score-red';
-    if (numericScore >= 90) { colorClass = 'score-green'; }
-    else if (numericScore >= 70) { colorClass = 'score-yellow'; }
-    requestAnimationFrame(() => {
-        progressBarDiv.style.width = `${numericScore}%`;
-        progressBarDiv.classList.remove('score-red', 'score-yellow', 'score-green');
-        progressBarDiv.classList.add(colorClass);
-    });
-}
-function showLoading(isLoading) {
-    loadingIndicator.style.display = isLoading ? 'block' : 'none';
-    analyzeButton.disabled = isLoading;
-}
-function showError(message) {
-    resultsDiv.style.display = 'none';
-    errorP.textContent = `Error: ${message}`;
-    console.error("Error displayed to user:", message);
-    showLoading(false);
-}
-function clearResults() {
-    sendHighlightRequestToContentScript(null); // Clear highlights
-    scoreTextDisplayDiv.textContent = '-- / 100';
-    progressBarDiv.style.width = '0%';
-    progressBarDiv.classList.remove('score-red', 'score-yellow', 'score-green');
-    analysisRawTextPre.textContent = '';
-    analysisRawTextPre.style.display = 'none';
-    errorP.textContent = '';
-    resultsDiv.style.display = 'none';
 }
