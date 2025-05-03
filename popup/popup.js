@@ -7,6 +7,7 @@ const loadingIndicator = document.getElementById('loadingIndicator');
 const errorP = document.getElementById('error');
 const scoreTextDisplayDiv = document.getElementById('scoreTextDisplay');
 const progressBarDiv = document.getElementById('progressBar');
+const domainWarningDiv = document.getElementById('domainWarning'); // Added for domain warning
 
 // API Key Elements
 const apiKeyInput = document.getElementById('apiKey');
@@ -62,19 +63,19 @@ toggleApiKeyButton.addEventListener('click', () => {
     apiKeySeparator.style.display = isHidden ? 'block' : 'none';
     // Update status message when showing the input area if no key is set
     if (isHidden) {
-         chrome.storage.local.get(['geminiApiKey'], (result) => {
+        chrome.storage.local.get(['geminiApiKey'], (result) => {
             if (!result.geminiApiKey) {
-                 apiKeyStatus.textContent = 'Enter your Gemini API Key below.';
-                 apiKeyStatus.style.color = '#555'; // Neutral color
+                apiKeyStatus.textContent = 'Enter your Gemini API Key below.';
+                apiKeyStatus.style.color = '#555'; // Neutral color
             } else {
-                 // If key exists, maybe show a different message or keep the 'Key is set' message
-                 apiKeyStatus.textContent = 'API Key is set. You can update it below.';
-                 apiKeyStatus.style.color = 'green';
+                // If key exists, maybe show a different message or keep the 'Key is set' message
+                apiKeyStatus.textContent = 'API Key is set. You can update it below.';
+                apiKeyStatus.style.color = 'green';
             }
-         });
+        });
     } else {
-         // When hiding, revert status based on whether key is actually saved
-         chrome.storage.local.get(['geminiApiKey'], (result) => {
+        // When hiding, revert status based on whether key is actually saved
+        chrome.storage.local.get(['geminiApiKey'], (result) => {
             if (result.geminiApiKey) {
                 apiKeyStatus.textContent = 'API Key is set.';
                 apiKeyStatus.style.color = 'green';
@@ -82,7 +83,7 @@ toggleApiKeyButton.addEventListener('click', () => {
                 apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
                 apiKeyStatus.style.color = '#e74c3c';
             }
-         });
+        });
     }
 });
 // --- (End API Key Handling) ---
@@ -106,7 +107,7 @@ analyzeButton.addEventListener('click', () => {
 
         chrome.tabs.sendMessage(
             activeTabId, { action: "getText" }, (response) => {
-                 if (chrome.runtime.lastError) {
+                if (chrome.runtime.lastError) {
                     console.error("Error sending message to content script:", chrome.runtime.lastError.message);
                     showError(`Could not communicate with the page. Error: ${chrome.runtime.lastError.message}`);
                     showLoading(false); return;
@@ -129,15 +130,31 @@ analyzeButton.addEventListener('click', () => {
                                 if (typeof analysisResponse.score !== 'undefined') {
                                     displayScoreBar(analysisResponse.score);
                                 } else {
-                                     console.warn("Score missing from analysis response.");
-                                     // Optionally display a message or default bar
-                                     scoreTextDisplayDiv.textContent = 'Score N/A';
-                                     progressBarDiv.style.width = '0%';
-                                     progressBarDiv.className = 'progress-bar'; // Reset color
+                                    console.warn("Score missing from analysis response.");
+                                    // Optionally display a message or default bar
+                                    scoreTextDisplayDiv.textContent = 'Score N/A';
+                                    progressBarDiv.style.width = '0%';
+                                    progressBarDiv.className = 'progress-bar'; // Reset color
                                 }
 
-                                // Store raw analysis text (hidden)
-                                analysisRawTextPre.textContent = analysisResponse.analysis || "No detailed analysis available."; // Keep raw analysis if needed
+                                // *** Display Domain Warning ***
+                                if (analysisResponse.domainInfo && analysisResponse.domainInfo.isUnreliable) {
+                                    if(domainWarningDiv) {
+                                        domainWarningDiv.textContent = `⚠️ Warning: The domain "${analysisResponse.domainInfo.name}" is often associated with unreliable information.`;
+                                        domainWarningDiv.style.display = 'block'; // Make it visible
+                                        domainWarningDiv.style.color = '#e74c3c'; // Use warning color
+                                        domainWarningDiv.style.marginTop = '10px'; // Add some spacing
+                                        domainWarningDiv.style.padding = '8px';
+                                        domainWarningDiv.style.border = '1px solid #e74c3c';
+                                        domainWarningDiv.style.borderRadius = '4px';
+                                        domainWarningDiv.style.backgroundColor = '#fbeae5';
+                                    }
+                                } else if (domainWarningDiv) {
+                                    domainWarningDiv.style.display = 'none'; // Hide if not unreliable or info missing
+                                }
+
+                                // Store raw analysis text (hidden) - Keep this if needed for debugging or future features
+                                // analysisRawTextPre.textContent = analysisResponse.analysis || "No detailed analysis available.";
 
                                 // *** Send flags to content script for highlighting ***
                                 if (analysisResponse.flags && analysisResponse.flags.length > 0) {
@@ -167,13 +184,13 @@ analyzeButton.addEventListener('click', () => {
 // --- Function to send highlight request to content script ---
 function sendHighlightRequestToContentScript(flags, tabId) {
     if (!tabId) { // If called just to clear highlights
-         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-             if (tabs && tabs.length > 0 && tabs[0].id) {
-                 chrome.tabs.sendMessage(tabs[0].id, { action: "highlightText", flags: flags });
-             }
-         });
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs.length > 0 && tabs[0].id) {
+                chrome.tabs.sendMessage(tabs[0].id, { action: "highlightText", flags: flags });
+            }
+        });
     } else {
-         chrome.tabs.sendMessage(tabId, { action: "highlightText", flags: flags });
+        chrome.tabs.sendMessage(tabId, { action: "highlightText", flags: flags });
     }
 }
 
@@ -235,6 +252,12 @@ function clearResults() {
     // Clear errors and hide results div
     errorP.textContent = '';
     resultsDiv.style.display = 'none';
+
+    // Clear domain warning
+    if (domainWarningDiv) {
+        domainWarningDiv.textContent = '';
+        domainWarningDiv.style.display = 'none';
+    }
 
     // Clear previous highlights on the page
     sendHighlightRequestToContentScript(null);
