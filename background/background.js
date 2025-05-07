@@ -1,8 +1,25 @@
 // background/background.js
 
-// --- Window Management (Keep if you reverted, remove if you kept the window popup) ---
-let popupWindowId = null;
-// ... (rest of window management code if applicable) ...
+let supabase = null;
+
+async function initSupabase() {
+  const module = await import('./config/supabaseClient.js');
+  supabase = module.default;
+  console.log('Supabase initialized:', supabase);
+}
+
+// Call this only once (e.g. on startup)
+initSupabase();
+
+// Set of known unreliable domains (Curate this list carefully!)
+// const unreliableDomains = new Set([
+//     'infowars.com',
+//     'breitbart.com',
+//     'naturalnews.com',
+//     'dailycaller.com',
+//     'smninewschannel.com',
+//     // Add more based on reputable sources and clear criteria
+// ]);
 
 // Listener for messages from popup or content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -14,24 +31,72 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!apiKey) {
                 console.error("Gemini API Key not found in storage.");
                 sendResponse({ success: false, error: "API Key not set. Please set it in the popup." });
-                return true;
+                return true; // Exit early if no API key
             }
+    
+            chrome.windows.getCurrent({ populate: true }, (window) => {
+                // Query for the active tab to get its URL for domain checking
+                console.log("Querying active tab...");
+                chrome.tabs.query({ active: true, windowId: window.id }, (tabs) => {
+                    console.log("Tabs found:", tabs);
+                    if (chrome.runtime.lastError || !tabs || tabs.length === 0 || !tabs[0].url) {
+                        console.error("Error querying active tab or tab URL missing:", chrome.runtime.lastError?.message);
+                        // Proceed without domain check if tab query fails
+                        performAnalysis(request.text, apiKey, null, false, sendResponse);
+                        return;
+                    }
+        
+                    const activeTabUrl = tabs[0].url;
+                    let domain = null;
+                    let isUnreliable = false;
+        
+                    try {
+                        const url = new URL(activeTabUrl);
+                        // Ensure it's an http/https URL before checking domain
+                        if (url.protocol === "http:" || url.protocol === "https:") {
+                            domain = url.hostname.replace(/^www\./, ''); // Remove 'www.'
+                        } else {
+                            console.log(`Skipping domain check for non-http(s) URL: ${activeTabUrl}`);
+                        }
+                    } catch (e) {
+                        console.error("Could not parse active tab URL:", activeTabUrl, e);
+                    }
+                    // fetch the table unreliableDomain from supabase
+                    supabase
+                        .from('unreliable_domain')
+                        .select('domain_url')
+                        .then(({ data, error }) => {
+                            if (error) {
+                                console.error("Error fetching unreliable domains from Supabase:", error);
+                                // Proceed with analysis even if the domain check fails
+                                performAnalysis(request.text, apiKey, domain, isUnreliable, sendResponse);
+                                return;
+                            }
 
-            // *** Call the updated Gemini API function ***
-            callGeminiAPIForHighlighting(request.text, apiKey)
-                .then(analysisData => {
-                    console.log("Gemini API Processed Response for Highlighting:", analysisData);
-                    // *** Send score AND highlight data ***
-                    sendResponse({ success: true, ...analysisData });
-                })
-                .catch(error => {
-                    console.error("Error calling/processing Gemini API for highlighting:", error);
-                    sendResponse({ success: false, error: error.message || "Failed to fetch or process analysis from Gemini" });
-                });
-        });
-        return true; // Keep channel open for async response
+                            // Check if the domain is in the unreliableDomain table
+                            const unreliableDomains = new Set(data.map(item => item.domain_url)); // set of domains
+                            console.log("Unreliable domains fetched from Supabase:", unreliableDomains);
+                            console.log("Domain to check:", domain);
+                            if (unreliableDomains.has(domain)) {
+                                isUnreliable = true;
+                                console.log(`Domain found in unreliable list: ${domain}`);
+                            }
+
+                            // Perform the analysis after domain check
+                            performAnalysis(request.text, apiKey, domain, isUnreliable, sendResponse);
+                        })
+                        .catch((error) => {
+                            console.error("Error querying Supabase:", error);
+                            // Proceed with analysis even if there’s an issue fetching the domains
+                           performAnalysis(request.text, apiKey, domain, isUnreliable, sendResponse);
+                        });
+                }); // End chrome.tabs.query
+            });
+            
+        }); // End chrome.storage.local.get
+        return true; // Keep the channel open for async response from tabs.query and fetch
     }
-    // *** NEW: Listener case for snippet verification ***
+    // *** Listener case for snippet verification *** (Keep this as it was before the last correction attempt)
     else if (request.action === "verifySnippet") {
         chrome.storage.local.get(['geminiApiKey'], (result) => {
             const apiKey = result.geminiApiKey;
@@ -76,7 +141,50 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true; // Keep channel open for async response
     }
-});
+}); // End chrome.runtime.onMessage.addListener
+
+
+// Helper function to contain the analysis logic after getting domain info
+function performAnalysis(textToAnalyze, apiKey, domain, isUnreliable, sendResponse) {
+    callGeminiAPIForHighlighting(textToAnalyze, apiKey)
+        .then(analysisData => {
+            console.log("Gemini API Processed Response for Highlighting:", analysisData);
+
+            // *** Modify response based on domain check ***
+            let finalScore = analysisData.score;
+            let flags = analysisData.flags || [];
+
+            if (isUnreliable) {
+                // Option 1: Drastically reduce score (Example: cap at 15)
+                // This is a policy decision - adjust as needed.
+                finalScore = Math.min(finalScore ?? 100, 15); // Use ?? 100 to handle undefined score
+
+                // Option 2: Add a specific flag (Example: add to beginning)
+                flags.unshift({
+                    snippet: `Website Domain (${domain})`,
+                    reason: "This domain is on a list of sources frequently associated with unreliable information."
+                });
+            }
+
+            // *** Send score, flags, AND domain status ***
+            sendResponse({
+                success: true,
+                score: finalScore, // Send potentially modified score
+                flags: flags,      // Send potentially modified flags
+                domainInfo: {      // Add domain info to the response
+                    name: domain,
+                    isUnreliable: isUnreliable
+                }
+            });
+        })
+        .catch(error => {
+            console.error("Error calling/processing Gemini API for highlighting:", error);
+            sendResponse({ success: false, error: error.message || "Failed to fetch or process analysis from Gemini" });
+        });
+} // End performAnalysis function
+
+
+console.log("Background script loaded (v5 - Verification Added).");
 
 
 // *** Function for initial text analysis and highlighting flags ***
@@ -90,25 +198,25 @@ async function callGeminiAPIForHighlighting(textToAnalyze, apiKey) {
     const prompt = `Analyze the following text for potential signs of misinformation, bias, or manipulative language.
 
 Provide your analysis in JSON format with two main keys: "score" and "flags".
-1.  "score": A numerical credibility score between 0 (very low credibility) and 100 (very high credibility).
-2.  "flags": An array of objects. Each object should represent a specific problematic text snippet and have two keys:
+1. 	"score": A numerical credibility score between 0 (very low credibility) and 100 (very high credibility).
+2. 	"flags": An array of objects. Each object should represent a specific problematic text snippet and have two keys:
     - "snippet": The exact text snippet (maximum 2 sentences) that contains potential issues.
     - "reason": A brief explanation (1 sentence) of why this snippet is flagged (e.g., "Uses emotionally charged language", "Lacks supporting evidence", "Potential logical fallacy").
 
 Example JSON output format:
 \`\`\`json
 {
-  "score": 45,
-  "flags": [
-    {
-      "snippet": "This outrageous policy will bankrupt the nation overnight!",
-      "reason": "Uses highly sensational and exaggerated language without evidence."
-    },
-    {
-      "snippet": "Everyone agrees that this is the only solution.",
-      "reason": "Makes a broad generalization ('Everyone agrees') that is likely untrue."
-    }
-  ]
+    "score": 45,
+    "flags": [
+        {
+            "snippet": "This outrageous policy will bankrupt the nation overnight!",
+            "reason": "Uses highly sensational and exaggerated language without evidence."
+        },
+        {
+            "snippet": "Everyone agrees that this is the only solution.",
+            "reason": "Makes a broad generalization ('Everyone agrees') that is likely untrue."
+        }
+    ]
 }
 \`\`\`
 
@@ -132,9 +240,9 @@ JSON Analysis:`;
                 "contents": [{ "parts": [{ "text": prompt }] }],
                 // *** IMPORTANT: Tell Gemini to output JSON ***
                 "generationConfig": {
-                     "response_mime_type": "application/json", // Request JSON output
-                     "temperature": 0.3, // Lower temperature for more predictable JSON
-                     "maxOutputTokens": 800 // May need more tokens for JSON + analysis
+                    "response_mime_type": "application/json", // Request JSON output
+                    "temperature": 0.3, // Lower temperature for more predictable JSON
+                    "maxOutputTokens": 800 // May need more tokens for JSON + analysis
                 }
             })
         });
@@ -157,7 +265,6 @@ JSON Analysis:`;
             data.candidates[0].content && data.candidates[0].content.parts &&
             data.candidates[0].content.parts.length > 0)
         {
-            // Assuming the JSON object is the first part's text
              // Sometimes Gemini wraps JSON in ```json ... ```, try to extract it
              let jsonString = data.candidates[0].content.parts[0].text;
              const jsonMatch = jsonString.match(/```json\s*([\s\S]*?)\s*```/);
@@ -166,21 +273,21 @@ JSON Analysis:`;
              }
 
              try {
-                const analysisData = JSON.parse(jsonString);
-                console.log("Successfully parsed analysis JSON from Gemini.");
+                 const analysisData = JSON.parse(jsonString);
+                 console.log("Successfully parsed analysis JSON from Gemini.");
 
-                // Validate the structure
-                const score = (analysisData && typeof analysisData.score === 'number')
-                    ? Math.max(0, Math.min(100, analysisData.score))
-                    : 50; // Default score if missing/invalid
-                const flags = (analysisData && Array.isArray(analysisData.flags))
-                    ? analysisData.flags.filter(f => f && typeof f.snippet === 'string' && typeof f.reason === 'string') // Basic validation
-                    : []; // Default to empty array
+                 // Validate the structure
+                 const score = (analysisData && typeof analysisData.score === 'number')
+                     ? Math.max(0, Math.min(100, analysisData.score))
+                     : 50; // Default score if missing/invalid
+                 const flags = (analysisData && Array.isArray(analysisData.flags))
+                     ? analysisData.flags.filter(f => f && typeof f.snippet === 'string' && typeof f.reason === 'string') // Basic validation
+                     : []; // Default to empty array
 
                  console.log("Extracted Score:", score);
                  console.log("Extracted Flags:", flags);
 
-                return { score, flags }; // Return the parsed object
+                 return { score, flags }; // Return the parsed object
 
              } catch (parseError) {
                  console.error("Failed to parse JSON response from Gemini:", parseError);
@@ -204,8 +311,6 @@ JSON Analysis:`;
     }
 }
 
-console.log("Background script loaded (v5 - Verification Added).");
-
 
 // *** NEW: Function to verify a snippet and get sources ***
 async function verifySnippetWithSources(snippet, reason, apiKey) {
@@ -218,18 +323,18 @@ Snippet: "${snippet}"
 Reason: "${reason}"
 
 Please perform the following tasks based *only* on the provided snippet and reason:
-1.  **Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic given the reason. Focus on explaining the reasoning itself.
-2.  **Find Sources:** Search the web for 3 highly credible and relevant sources (e.g., reputable news organizations, academic institutions, established fact-checking sites) that provide context or evidence related to the explanation. Avoid opinion blogs or unreliable sources.
+1. 	**Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic given the reason. Focus on explaining the reasoning itself.
+2. 	**Find Sources:** Search the web for 3 highly credible and relevant sources (e.g., reputable news organizations, academic institutions, established fact-checking sites) that provide context or evidence related to the explanation. Avoid opinion blogs or unreliable sources.
 
 Provide your response strictly in the following JSON format:
 \`\`\`json
 {
-  "summary": "Your 2-3 sentence explanation here.",
-  "sources": [
-    "URL of source 1",
-    "URL of source 2",
-    "URL of source 3"
-  ]
+    "summary": "Your 2-3 sentence explanation here.",
+    "sources": [
+        "URL of source 1",
+        "URL of source 2",
+        "URL of source 3"
+    ]
 }
 \`\`\`
 
@@ -251,8 +356,8 @@ JSON Verification:`;
                     "temperature": 0.4, // Slightly higher temp for more nuanced explanation
                     "maxOutputTokens": 500 // Adjust as needed
                 },
-                 // Enable web search tool if available/needed for the model version
-                 // "tools": [{ "google_search_retrieval": {} }] // Uncomment if using a model version that supports this tool explicitly
+                // Enable web search tool if available/needed for the model version
+                // "tools": [{ "google_search_retrieval": {} }] // Uncomment if using a model version that supports this tool explicitly
             })
         });
 
