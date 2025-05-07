@@ -27,9 +27,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (async () => {
             try {
                 // Await the result of the async function
+                const start = performance.now();
                 const text = await extractPageText(); // Use the enhanced function name
 
+                const end = performance.now(); // End timer
+                const elapsed = (end - start).toFixed(2); // In milliseconds with 2 decimals
+
+                console.log(`Text extraction completed in ${elapsed} ms`);
+
                 if (text && text !== "Content extraction failed or page has no significant text.") {
+
                     console.log("Successfully extracted text.");
                     sendResponse({ success: true, text: text });
                 } else {
@@ -490,139 +497,62 @@ initModalElements();
 
 
 // --- Text Extraction Logic ---
-async function extractPageText(timeoutMs = 5000) {
+async function extractPageText() { // no timeout logic, less robust but more efficient
     const mainContentSelectors = [
-        'article[class*="article"]', // More specific article tags
-        'article.post',
-        'article.story',
-        'div[class*="article-body"]',
-        'div[class*="post-content"]',
-        'div[class*="entry-content"]',
-        'div[class*="story-content"]',
-        'div[id*="article-content"]',
-        'div[itemprop="articleBody"]', // Schema.org microdata
-        'section[class*="article-content"]',
-        'div.main-content', // Common generic wrappers
-        'div#main-content',
-        'div.td-post-content', // Newspaper/Magazine themes
-        'div.content__body', // Some news sites (e.g., The Guardian)
-        'main[id*="main"]',
-        'article', 'main', '.post-content', '.entry-content', '#content', '#main-content', // Generic fallback
-        // Add more as you identify common patterns
+        'article[class*="article"]', 'article.post', 'article.story',
+        'div[class*="article-body"]', 'div[class*="post-content"]',
+        'div[class*="entry-content"]', 'div[class*="story-content"]',
+        'div[id*="article-content"]', 'div[itemprop="articleBody"]',
+        'section[class*="article-content"]', 'div.main-content', 'div#main-content',
+        'div.td-post-content', 'div.content__body', 'main[id*="main"]',
+        'article', 'main', '.post-content', '.entry-content', '#content', '#main-content'
     ];
 
     const selectorsToRemove = [
         'nav', 'header', 'footer', 'aside', 'script', 'style',
-        '.sidebar', '#sidebar',
-        '.ads', '.advertisement', '.ad-slot', 'div[class*="ad"]',
-        '.comments', '#comments', '.comment-section',
-        '.related-articles', '.related-posts', 'div[class*="related"]',
-        '.social-share', '.sharing-buttons', 'div[class*="share"]',
-        '.author-bio', '.author-box', // Sometimes these are separate and verbose
-        '.newsletter-signup', 'div[class*="newsletter"]',
-        '.print-button', '.email-button',
-        'figure > figcaption', // Remove figcaptions if they are too noisy, or adjust if needed
-        '.breaking-news-banner',
-        '#top-navigation',
-        '.site-header',
-        '.site-footer',
-        'form', // Remove forms like search or comments
-        'ul[class*="nav"]', // Navigation lists
-        'div[class*="cookie"]', // Cookie banners
-        'div[id*="cookie"]',
-        'div[class*="banner"]',
-        // Be cautious with very generic selectors here, they might remove content
+        '.sidebar', '#sidebar', '.ads', '.advertisement', '.ad-slot', 'div[class*="ad"]',
+        '.comments', '#comments', '.comment-section', '.related-articles', '.related-posts',
+        'div[class*="related"]', '.social-share', '.sharing-buttons', 'div[class*="share"]',
+        '.author-bio', '.author-box', '.newsletter-signup', 'div[class*="newsletter"]',
+        '.print-button', '.email-button', 'figure > figcaption', '.breaking-news-banner',
+        '#top-navigation', '.site-header', '.site-footer', 'form', 'ul[class*="nav"]',
+        'div[class*="cookie"]', 'div[id*="cookie"]', 'div[class*="banner"]'
     ];
 
     let mainElement = null;
-    let foundContent = false;
-
-    async function waitForElement(selector, interval = 100, timeout = timeoutMs) {
-        return new Promise((resolve) => {
-            const endTime = Date.now() + timeout;
-            const timer = setInterval(() => {
-                const element = document.querySelector(selector);
-                if (element) {
-                    clearInterval(timer);
-                    resolve(element);
-                } else if (Date.now() > endTime) {
-                    clearInterval(timer);
-                    resolve(null); // Timeout
-                }
-            }, interval);
-        });
-    }
 
     for (const selector of mainContentSelectors) {
-        const element = await waitForElement(selector, 200, timeoutMs / mainContentSelectors.length); // Distribute timeout
-        if (element && element.innerText && element.innerText.trim().length > 100) { // Basic check for some content
-            // Check if this element isn't just a wrapper for another more specific selector we already have
-            let isBestCandidate = true;
-            if (mainElement) {
-                if (mainElement.contains(element)) { // 'element' is inside 'mainElement', so mainElement is better
-                    isBestCandidate = false;
-                } else if (element.contains(mainElement)) { // 'mainElement' was inside 'element', so 'element' is better
-                    mainElement = element;
-                } else {
-                     // If they are separate, prefer the one with more text or a more specific selector (hard to quantify easily here)
-                     // For now, let's assume the first one that's sufficiently long is good, or override if clearly better
-                }
-            } else {
-                 mainElement = element;
-            }
-
-            if(isBestCandidate && mainElement === element) {
-                console.log("Found main content with selector:", selector);
-                foundContent = true;
-                // You could break here if you are satisfied with the first good match
-                // or continue to see if a more deeply nested (and thus potentially more specific) selector matches.
-                // For now, let's try to get the most specific one that still has decent content.
-            }
+        const element = document.querySelector(selector);
+        if (element && element.innerText && element.innerText.trim().length > 100) {
+            mainElement = element;
+            console.log("Found main content with selector:", selector);
+            break;
         }
     }
 
     let mainText = '';
 
     if (mainElement) {
-        // Clone the found element to avoid altering the live page if we do more aggressive cleanup
-        const mainContentClone = mainElement.cloneNode(true);
-
-        // Remove unwanted sub-elements from the cloned main content
-        selectorsToRemove.forEach(selector => {
-            mainContentClone.querySelectorAll(selector).forEach(el => el.remove());
-        });
-        mainText = mainContentClone.innerText;
-    }
-
-
-    // 2. Fallback if no specific main content element was found
-    if (!foundContent || !mainText.trim()) {
-        console.log("Falling back to generic body cleanup.");
+        const clone = mainElement.cloneNode(true);
+        selectorsToRemove.forEach(sel => clone.querySelectorAll(sel).forEach(el => el.remove()));
+        mainText = clone.innerText;
+    } else {
+        console.log("Falling back to full body cleanup.");
         const bodyClone = document.body.cloneNode(true);
-        selectorsToRemove.forEach(selector => {
-            bodyClone.querySelectorAll(selector).forEach(el => el.remove());
-        });
+        selectorsToRemove.forEach(sel => bodyClone.querySelectorAll(sel).forEach(el => el.remove()));
         mainText = bodyClone.innerText;
     }
 
-    // 3. Clean up the extracted text
-    // Remove excessive newlines and trim whitespace
-    mainText = mainText.replace(/(\s*\n\s*){3,}/g, '\n\n'); // Replace 3+ newlines (with optional surrounding spaces) with double newlines
-    mainText = mainText.replace(/[ \t\r]+/g, ' '); // Replace multiple spaces/tabs with a single space
-    mainText = mainText.split('\n').map(line => line.trim()).filter(line => line.length > 0).join('\n');
-    mainText = mainText.trim();
+    mainText = mainText
+        .replace(/(\s*\n\s*){3,}/g, '\n\n') // Limit newlines
+        .replace(/[ \t\r]+/g, ' ')          // Remove excess whitespace
+        .split('\n').map(line => line.trim()).filter(line => line).join('\n')
+        .trim();
 
-
-    // 4. Truncate if necessary
-    const MAX_LENGTH = 15000; // Increased for potentially longer articles
+    const MAX_LENGTH = 15000;
     if (mainText.length > MAX_LENGTH) {
         mainText = mainText.substring(0, MAX_LENGTH) + "... (truncated)";
     }
 
-    if (!mainText) {
-        console.warn("Could not extract significant text.");
-        return "Content extraction failed or page has no significant text.";
-    }
-
-    return mainText;
+    return mainText || "Content extraction failed or page has no significant text.";
 }

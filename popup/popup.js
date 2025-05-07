@@ -168,6 +168,16 @@ toggleApiKeyButton.addEventListener('click', () => {
 });
 // --- (End API Key Handling) ---
 
+// --- Used for checking logging new unreliable domain ---
+// analyzeButton.addEventListener('click', () => {
+//     console.log("Analyze button clicked.");
+//     const domain_info_test = {      // Add domain info to the response
+//         name: 'example.com',
+//         isUnreliable: false,
+//         reliability: null
+//     }
+//     displayScoreBar(30, domain_info_test); // Temporary for testing
+// });
 
 // --- Analysis Trigger ---
 analyzeButton.addEventListener('click', () => {
@@ -193,6 +203,7 @@ analyzeButton.addEventListener('click', () => {
                     showLoading(false); return;
                 }
                 if (response && response.success && response.text) {
+                    console.log(response.text)
                     // Send text to background for analysis
                     chrome.runtime.sendMessage(
                         { action: "analyzeText", text: response.text },
@@ -208,7 +219,7 @@ analyzeButton.addEventListener('click', () => {
                             if (analysisResponse && analysisResponse.success) {
                                 // Display score bar (if score exists)
                                 if (typeof analysisResponse.score !== 'undefined') {
-                                    displayScoreBar(analysisResponse.score);
+                                    displayScoreBar(analysisResponse.score, analysisResponse.domainInfo);
                                 } else {
                                     console.warn("Score missing from analysis response.");
                                     // Optionally display a message or default bar
@@ -300,7 +311,7 @@ function sendHighlightRequestToContentScript(flags, tabId) {
 
 // --- Progress Bar Display Function ---
 // *** RENAMED from displayChart and REIMPLEMENTED ***
-function displayScoreBar(score) {
+function displayScoreBar(score, domain_info) {
     // Ensure score is a number between 0 and 100
     const numericScore = Math.max(0, Math.min(100, Number(score)));
 
@@ -324,8 +335,13 @@ function displayScoreBar(score) {
     progressBarDiv.classList.remove('score-red', 'score-yellow', 'score-green');
     progressBarDiv.classList.add(colorClass);
 
-    // Optional: Add score text inside the bar if needed
-    // progressBarDiv.textContent = `${numericScore}%`;
+    if (!domain_info.isUnreliable && numericScore <= 50) {
+        chrome.runtime.sendMessage({
+            action: "logNewUnreliableDomain",
+            score: numericScore,
+            domain: domain_info.name
+        });
+    }
 }
 
 

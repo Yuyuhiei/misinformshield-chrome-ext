@@ -148,6 +148,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true; // Keep channel open for async response
     }
+    else if (request.action === "logNewUnreliableDomain") {
+        handleLogUnreliableDomain(request).then(() => {
+            sendResponse({ success: true });
+        }).catch((error) => {
+            console.error("Error logging unreliable domain:", error);
+            sendResponse({ success: false, error: error.message });
+        });
+
+        // IMPORTANT: keep this true to allow async sendResponse
+        return true;
+    }
 }); // End chrome.runtime.onMessage.addListener
 
 
@@ -433,5 +444,51 @@ JSON Verification:`;
     } catch (error) {
         console.error("Verification fetch or processing error:", error);
         throw error; // Re-throw
+    }
+}
+
+async function handleLogUnreliableDomain(request) {
+    const domain = request.domain;
+    const score = request.score;
+
+    const { data, error } = await supabase
+        .from('scores')
+        .select('increment, score_average')
+        .eq('domain_url', domain)
+        .single();
+
+    if (error && error.code !== 'PGRST116') {
+        throw error;
+    }
+
+    if (!data) {
+        await supabase.from('scores').insert({
+            domain_url: domain,
+            increment: 1,
+            score_average: score
+        });
+    } else {
+        const { increment, score_average } = data;
+
+        if (increment >= 10) {
+            const reliability = Math.max(1, Math.ceil(score_average / 20));
+
+            await supabase
+                .from('unreliable_domain')
+                .upsert({ domain_url: domain, reliability });
+
+            return;
+        }
+
+        const newIncrement = increment + 1;
+        const newAverage = ((score_average * increment) + score) / newIncrement;
+
+        await supabase
+            .from('scores')
+            .update({
+                increment: newIncrement,
+                score_average: newAverage
+            })
+            .eq('domain_url', domain);
     }
 }
