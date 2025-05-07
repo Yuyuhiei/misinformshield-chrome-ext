@@ -138,19 +138,41 @@ analyzeButton.addEventListener('click', () => {
                                 }
 
                                 // *** Display Domain Warning ***
-                                if (analysisResponse.domainInfo && analysisResponse.domainInfo.isUnreliable) {
-                                    if(domainWarningDiv) {
-                                        domainWarningDiv.textContent = `⚠️ Warning: The domain "${analysisResponse.domainInfo.name}" is often associated with unreliable information.`;
-                                        domainWarningDiv.style.display = 'block'; // Make it visible
-                                        domainWarningDiv.style.color = '#e74c3c'; // Use warning color
-                                        domainWarningDiv.style.marginTop = '10px'; // Add some spacing
+                                if (analysisResponse.domainInfo && typeof analysisResponse.domainInfo.reliability === 'number') {
+                                    const reliability = analysisResponse.domainInfo.reliability;
+                                    const domain = analysisResponse.domainInfo.name;
+                                
+                                    if (domainWarningDiv) {
+                                        domainWarningDiv.style.marginTop = '10px';
                                         domainWarningDiv.style.padding = '8px';
-                                        domainWarningDiv.style.border = '1px solid #e74c3c';
+                                        domainWarningDiv.style.border = '1px solid';
                                         domainWarningDiv.style.borderRadius = '4px';
-                                        domainWarningDiv.style.backgroundColor = '#fbeae5';
+                                
+                                        if (reliability <= 5) {
+                                            // Unreliable
+                                            domainWarningDiv.textContent = `⚠️ Warning: The domain "${domain}" is frequently associated with unreliable information (Reliability: ${reliability}/10).`;
+                                            domainWarningDiv.style.display = 'block';
+                                            domainWarningDiv.style.color = '#e74c3c'; // red
+                                            domainWarningDiv.style.borderColor = '#e74c3c';
+                                            domainWarningDiv.style.backgroundColor = '#fbeae5';
+                                        } else if (reliability >= 9) {
+                                            // Highly reliable
+                                            domainWarningDiv.textContent = `✅ Trusted Source: The domain "${domain}" has a high reliability rating (${reliability}/10).`;
+                                            domainWarningDiv.style.display = 'block';
+                                            domainWarningDiv.style.color = '#2e7d32'; // green
+                                            domainWarningDiv.style.borderColor = '#2e7d32';
+                                            domainWarningDiv.style.backgroundColor = '#e8f5e9';
+                                        } else {
+                                            // Medium reliability
+                                            domainWarningDiv.textContent = `ℹ️ Info: The domain "${domain}" has a moderate reliability score (${reliability}/10). Interpret with care.`;
+                                            domainWarningDiv.style.display = 'block';
+                                            domainWarningDiv.style.color = '#f39c12'; // amber
+                                            domainWarningDiv.style.borderColor = '#f39c12';
+                                            domainWarningDiv.style.backgroundColor = '#fff4e5';
+                                        }
                                     }
                                 } else if (domainWarningDiv) {
-                                    domainWarningDiv.style.display = 'none'; // Hide if not unreliable or info missing
+                                    domainWarningDiv.style.display = 'none'; // No info available
                                 }
 
                                 // Store raw analysis text (hidden) - Keep this if needed for debugging or future features

@@ -64,26 +64,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     // fetch the table unreliableDomain from supabase
                     supabase
                         .from('unreliable_domain')
-                        .select('domain_url')
+                        .select('domain_url, reliability')
                         .then(({ data, error }) => {
                             if (error) {
                                 console.error("Error fetching unreliable domains from Supabase:", error);
                                 // Proceed with analysis even if the domain check fails
-                                performAnalysis(request.text, apiKey, domain, isUnreliable, sendResponse);
+                                performAnalysis(request.text, apiKey, domain, false, sendResponse);
                                 return;
                             }
-
-                            // Check if the domain is in the unreliableDomain table
-                            const unreliableDomains = new Set(data.map(item => item.domain_url)); // set of domains
-                            console.log("Unreliable domains fetched from Supabase:", unreliableDomains);
+                            console.log("Unreliable domains fetched from Supabase:", data);
                             console.log("Domain to check:", domain);
-                            if (unreliableDomains.has(domain)) {
-                                isUnreliable = true;
+                            
+                            // Find matching domain entry
+                            const matchedEntry = data.find(item => item.domain_url === domain);
+
+                            if (matchedEntry) {
                                 console.log(`Domain found in unreliable list: ${domain}`);
+                                performAnalysis(request.text, apiKey, domain, true, sendResponse, matchedEntry.reliability);
+                            } else {
+                                performAnalysis(request.text, apiKey, domain, false, sendResponse);
                             }
 
-                            // Perform the analysis after domain check
-                            performAnalysis(request.text, apiKey, domain, isUnreliable, sendResponse);
                         })
                         .catch((error) => {
                             console.error("Error querying Supabase:", error);
@@ -145,25 +146,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 
 // Helper function to contain the analysis logic after getting domain info
-function performAnalysis(textToAnalyze, apiKey, domain, isUnreliable, sendResponse) {
+function performAnalysis(textToAnalyze, apiKey, domain, isUnreliable, sendResponse, reliability = null) {
     callGeminiAPIForHighlighting(textToAnalyze, apiKey)
         .then(analysisData => {
             console.log("Gemini API Processed Response for Highlighting:", analysisData);
 
             // *** Modify response based on domain check ***
-            let finalScore = analysisData.score;
+            let finalScore = analysisData.score ?? 100;
             let flags = analysisData.flags || [];
 
-            if (isUnreliable) {
-                // Option 1: Drastically reduce score (Example: cap at 15)
-                // This is a policy decision - adjust as needed.
-                finalScore = Math.min(finalScore ?? 100, 15); // Use ?? 100 to handle undefined score
+            if (typeof reliability === 'number') {
+                if (reliability <= 5) {
+                    // Unreliable source — cap based on reliability
+                    const cap = 10 * reliability; // e.g., 3 → cap at 30
+                    finalScore = Math.min(finalScore, cap);
 
-                // Option 2: Add a specific flag (Example: add to beginning)
-                flags.unshift({
-                    snippet: `Website Domain (${domain})`,
-                    reason: "This domain is on a list of sources frequently associated with unreliable information."
-                });
+                    flags.unshift({
+                        snippet: `Website Domain (${domain})`,
+                        reason: `This domain is marked unreliable with a reliability score of ${reliability}/10. Lower reliability reduces the maximum trust score.`
+                    });
+                } else if (reliability === 10) {
+                    // Trusted source — floor at 75
+                    finalScore = Math.max(finalScore, 85);
+                } else {
+                    // Medium reliability — cap between 75 and 90
+                    const cap = 60 + (reliability * 3); // e.g., 6 → 78, 9 → 87
+                    finalScore = Math.min(finalScore, cap);
+                }
             }
 
             // *** Send score, flags, AND domain status ***
@@ -173,7 +182,8 @@ function performAnalysis(textToAnalyze, apiKey, domain, isUnreliable, sendRespon
                 flags: flags,      // Send potentially modified flags
                 domainInfo: {      // Add domain info to the response
                     name: domain,
-                    isUnreliable: isUnreliable
+                    isUnreliable: isUnreliable,
+                    reliability: reliability
                 }
             });
         })
