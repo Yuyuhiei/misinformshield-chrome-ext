@@ -30,8 +30,88 @@ document.addEventListener('DOMContentLoaded', () => {
             apiKeyStatus.style.color = '#e74c3c'; // Use error color
             analyzeButton.disabled = true; // Disable analyze button if no key
         }
+
+         // Now do reload detection and restore/clear per-tab state
+         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const tabId = tabs[0].id;
+            const navEntries = performance.getEntriesByType("navigation");
+            const isReload = navEntries.length && navEntries[0].type === "reload";
+
+            if (isReload) {
+                console.log("reloaded");
+                clearResults();
+            } else {
+                restorePopupState(tabId);
+            }
+        });
     });
+
+    
 });
+
+// this is a function to save the popup state after analysis
+function savePopupState() {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tabId = tabs[0].id;
+    
+        const state = {
+            domainWarning: {
+                text: domainWarningDiv.textContent,
+                style: {
+                    marginTop: domainWarningDiv.style.marginTop,
+                    padding: domainWarningDiv.style.padding,
+                    border: domainWarningDiv.style.border,
+                    borderRadius: domainWarningDiv.style.borderRadius,
+                    display: domainWarningDiv.style.display,
+                    color: domainWarningDiv.style.color,
+                    backgroundColor: domainWarningDiv.style.backgroundColor,
+                    borderColor: domainWarningDiv.style.borderColor
+                }
+            },
+            scoreTextDisplay: {
+                text: scoreTextDisplayDiv.textContent,
+                width: progressBarDiv.style.width,
+                className: progressBarDiv.className
+            },
+            results: resultsDiv.style.display,
+            errorText: errorP.textContent
+        };
+    
+        chrome.storage.local.set({ [`popupState_${tabId}`]: state });
+    });
+}
+
+function restorePopupState() {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tabId = tabs[0].id;
+        const key = `popupState_${tabId}`;
+
+        chrome.storage.local.get([key], (data) => {
+            const state = data[key];
+            if (!state) return;
+
+            if (state.domainWarning && domainWarningDiv) {
+                domainWarningDiv.textContent = state.domainWarning.text;
+                Object.assign(domainWarningDiv.style, state.domainWarning.style);
+            }
+
+            if (state.scoreTextDisplay && scoreTextDisplayDiv && progressBarDiv) {
+                scoreTextDisplayDiv.textContent = state.scoreTextDisplay.text;
+                progressBarDiv.style.width = state.scoreTextDisplay.width;
+                progressBarDiv.className = state.scoreTextDisplay.className;
+            }
+
+            if (state.results && resultsDiv) {
+                resultsDiv.style.display = state.results;
+            }
+
+            if (state.errorText && errorP) {
+                errorP.textContent = state.errorText;
+            }
+        });
+    });
+}
+
 
 saveApiKeyButton.addEventListener('click', () => {
     const apiKey = apiKeyInput.value.trim();
@@ -186,7 +266,8 @@ analyzeButton.addEventListener('click', () => {
                                     console.log("No flags received from analysis.");
                                     // Optionally display a message in the popup
                                 }
-
+                                // save state after analysis
+                                savePopupState();
                             } else {
                                 // Handle analysis failure reported by background script
                                 showError(analysisResponse.error || "Analysis failed. Check background logs.");
@@ -202,6 +283,7 @@ analyzeButton.addEventListener('click', () => {
         ); // End chrome.tabs.sendMessage (getText)
     }); // End chrome.tabs.query
 }); // End analyzeButton listener
+
 
 // --- Function to send highlight request to content script ---
 function sendHighlightRequestToContentScript(flags, tabId) {

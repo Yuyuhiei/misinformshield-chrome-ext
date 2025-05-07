@@ -1,5 +1,11 @@
 // background/background.js
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'loading') {
+        chrome.storage.local.remove(`popupState_${tabId}`);
+    }
+});
+
 let supabase = null;
 
 async function initSupabase() {
