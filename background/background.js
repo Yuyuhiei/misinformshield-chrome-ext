@@ -406,8 +406,19 @@ Snippet: "${snippet}"
 Reason: "${reason}"
 
 Please perform the following tasks based *only* on the provided snippet and reason:
-1.  **Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic given the reason. Focus on explaining the reasoning itself.
-2.  **Find Sources:** Search the web for 3 highly credible and relevant sources (e.g., reputable news organizations, academic institutions, established fact-checking sites) that provide context or evidence related to the explanation. Avoid opinion blogs or unreliable sources.
+
+1. **Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic, focusing on the reasoning behind the concern. Explain how the snippet could be misleading, unsubstantiated, or problematic according to the reason provided.
+    
+2. **Find Sources:** Search the web for **3 highly credible and relevant sources** that provide context, evidence, or fact-based information related to the explanation. Use reputable sources such as:
+    - Reputable news organizations (e.g., BBC, New York Times)
+    - Academic institutions (e.g., universities or research papers)
+    - Established fact-checking sites (e.g., Snopes, FactCheck.org)
+
+    **Important guidelines for finding sources:**
+    - Avoid unreliable sources such as opinion blogs or sites with questionable credibility.
+    - Make sure the sources are directly related to the explanation and provide factual support.
+    
+    If you cannot find 3 credible sources, provide as many as you can and leave the rest as empty strings (""). If you can't provide any credible sources, return empty strings for all sources.
 
 Provide your response strictly in the following JSON format:
 \`\`\`json
@@ -421,7 +432,18 @@ Provide your response strictly in the following JSON format:
 }
 \`\`\`
 
-If you cannot find 3 credible sources, provide as many as you can and leave the rest as empty strings (""). If you can't provide any, return empty values.
+If no sources are found, return empty strings as follows:
+\`\`\`json
+{
+    "summary": "Your explanation here.",
+    "sources": [
+        "",
+        "",
+        ""
+    ]
+}
+\`\`\`
+
 JSON Verification:`;
     } else {
         console.log(sens);
