@@ -73,6 +73,12 @@ h2 {
     font-size: 0.9em;
 }
 
+.buttons {
+    display: flex;
+    flex-direction: row;
+    gap: 1rem;
+}
+
 button {
     padding: 10px 15px;
     background-color: #3498db;

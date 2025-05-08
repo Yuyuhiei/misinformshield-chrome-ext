@@ -1,6 +1,8 @@
 // popup/popup.js
 
-const analyzeButton = document.getElementById('analyzeButton');
+const analyzeButtonL = document.getElementById('analyzeButtonL');
+const analyzeButtonM = document.getElementById('analyzeButtonM');
+const analyzeButtonD = document.getElementById('analyzeButtonD');
 const resultsDiv = document.getElementById('results');
 const analysisRawTextPre = document.getElementById('analysisRawText');
 const loadingIndicator = document.getElementById('loadingIndicator');
@@ -24,11 +26,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result.geminiApiKey) {
             apiKeyStatus.textContent = 'API Key is set.';
             apiKeyStatus.style.color = 'green';
-            analyzeButton.disabled = false; // Enable analyze button if key exists
+            analyzeButtonL.disabled = false; // Enable analyze button if key exists
+            analyzeButtonM.disabled = false; // Enable analyze button if key exists
+            analyzeButtonD.disabled = false; // Enable analyze button if key exists
         } else {
             apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
             apiKeyStatus.style.color = '#e74c3c'; // Use error color
-            analyzeButton.disabled = true; // Disable analyze button if no key
+            analyzeButtonL.disabled = true; // Disable analyze button if no key
+            analyzeButtonM.disabled = true; // Disable analyze button if no key
+            analyzeButtonD.disabled = true; // Disable analyze button if no key
         }
 
          // Now do reload detection and restore/clear per-tab state
@@ -112,7 +118,6 @@ function restorePopupState() {
     });
 }
 
-
 saveApiKeyButton.addEventListener('click', () => {
     const apiKey = apiKeyInput.value.trim();
     if (apiKey) {
@@ -124,7 +129,9 @@ saveApiKeyButton.addEventListener('click', () => {
                 apiKeyStatus.textContent = 'API Key saved successfully!';
                 apiKeyStatus.style.color = 'green';
                 apiKeyInput.value = ''; // Clear the input field
-                analyzeButton.disabled = false; // Enable analyze button
+                analyzeButtonL.disabled = false; // Enable analyze button
+                analyzeButtonM.disabled = false; // Enable analyze button
+                analyzeButtonD.disabled = false; // Enable analyze button
                 // Optionally hide the section after saving
                 // apiKeyInputArea.style.display = 'none';
                 // apiKeySeparator.style.display = 'none';
@@ -180,13 +187,35 @@ toggleApiKeyButton.addEventListener('click', () => {
 // });
 
 // --- Analysis Trigger ---
-analyzeButton.addEventListener('click', () => {
+analyzeButtonL.addEventListener('click', () => {
     console.log("Analyze button clicked.");
     clearResults();
     showLoading(true);
     // Clear previous highlights on the page
     sendHighlightRequestToContentScript(null); // Send null to clear
+    analyzeTextQuery('light')
+}); // End analyzeButtonL listener
 
+analyzeButtonM.addEventListener('click', () => {
+    console.log("Analyze button clicked.");
+    clearResults();
+    showLoading(true);
+    // Clear previous highlights on the page
+    sendHighlightRequestToContentScript(null); // Send null to clear
+    analyzeTextQuery('medium')
+}); // End analyzeButtonM listener
+
+analyzeButtonD.addEventListener('click', () => {
+    console.log("Analyze button clicked.");
+    clearResults();
+    showLoading(true);
+    // Clear previous highlights on the page
+    sendHighlightRequestToContentScript(null); // Send null to clear
+    analyzeTextQuery('deep')
+}); // End analyzeButtonD listener
+
+
+function analyzeTextQuery(sens) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (!tabs || tabs.length === 0 || !tabs[0].id) {
             showError("Could not find active tab.");
@@ -206,7 +235,7 @@ analyzeButton.addEventListener('click', () => {
                     console.log(response.text)
                     // Send text to background for analysis
                     chrome.runtime.sendMessage(
-                        { action: "analyzeText", text: response.text },
+                        { action: "analyzeText", text: response.text, sens: sens },
                         (analysisResponse) => {
                             showLoading(false); // Hide loading indicator once response received
                             if (chrome.runtime.lastError) {
@@ -272,7 +301,7 @@ analyzeButton.addEventListener('click', () => {
                                 // *** Send flags to content script for highlighting ***
                                 if (analysisResponse.flags && analysisResponse.flags.length > 0) {
                                     console.log("Sending flags to content script:", analysisResponse.flags);
-                                    sendHighlightRequestToContentScript(analysisResponse.flags, activeTabId);
+                                    sendHighlightRequestToContentScript(analysisResponse.flags, activeTabId, sens);
                                 } else {
                                     console.log("No flags received from analysis.");
                                     // Optionally display a message in the popup
@@ -293,19 +322,18 @@ analyzeButton.addEventListener('click', () => {
             } // End response callback
         ); // End chrome.tabs.sendMessage (getText)
     }); // End chrome.tabs.query
-}); // End analyzeButton listener
-
+}
 
 // --- Function to send highlight request to content script ---
-function sendHighlightRequestToContentScript(flags, tabId) {
+function sendHighlightRequestToContentScript(flags, tabId, sens) {
     if (!tabId) { // If called just to clear highlights
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (tabs && tabs.length > 0 && tabs[0].id) {
-                chrome.tabs.sendMessage(tabs[0].id, { action: "highlightText", flags: flags });
+                chrome.tabs.sendMessage(tabs[0].id, { action: "highlightText", flags: flags, sens: sens });
             }
         });
     } else {
-        chrome.tabs.sendMessage(tabId, { action: "highlightText", flags: flags });
+        chrome.tabs.sendMessage(tabId, { action: "highlightText", flags: flags, sens: sens});
     }
 }
 
@@ -348,7 +376,9 @@ function displayScoreBar(score, domain_info) {
 // --- Helper Functions ---
 function showLoading(isLoading) {
     loadingIndicator.style.display = isLoading ? 'block' : 'none';
-    analyzeButton.disabled = isLoading;
+    analyzeButtonL.disabled = isLoading;
+    analyzeButtonM.disabled = isLoading;
+    analyzeButtonD.disabled = isLoading;
 }
 
 function showError(message) {
