@@ -5,16 +5,26 @@ const scanSensitivitySlider = document.getElementById('scanSensitivity');
 const scanSensitivityLabel = document.getElementById('scanSensitivityLabel');
 const startScanButton = document.getElementById('startScanButton');
 
-// Existing DOM Elements from your provided JS
+// Main Views & Navigation
+const mainAnalysisView = document.getElementById('mainAnalysisView');
+const unreliableDomainsView = document.getElementById('unreliableDomainsView');
+const popupTitle = document.getElementById('popupTitle'); // H1 title element
+const toggleDomainsViewButton = document.getElementById('toggleDomainsViewButton');
+const backToAnalysisButton = document.getElementById('backToAnalysisButton');
+
+// Domains View Elements
+const domainsTableContainer = document.getElementById('domainsTableContainer');
+
+// Existing DOM Elements
 const resultsDiv = document.getElementById('results');
-const analysisRawTextPre = document.getElementById('analysisRawText'); // Keep if used
+// const analysisRawTextPre = document.getElementById('analysisRawText'); // Kept commented if not used
 const loadingIndicator = document.getElementById('loadingIndicator');
-const errorP = document.getElementById('error'); // Ensure this ID matches HTML (changed to error-message class)
+const errorP = document.getElementById('error');
 const scoreTextDisplayDiv = document.getElementById('scoreTextDisplay');
 const progressBarDiv = document.getElementById('progressBar');
 const domainWarningDiv = document.getElementById('domainWarning');
 
-// API Key & Info Elements from your provided JS
+// API Key & Info Elements
 const apiKeyInput = document.getElementById('apiKey');
 const saveApiKeyButton = document.getElementById('saveApiKey');
 const apiKeyStatus = document.getElementById('apiKeyStatus');
@@ -25,7 +35,7 @@ const infoArea = document.getElementById('infoArea');
 const infoSeparator = document.getElementById('infoSeparator');
 const apiKeySeparator = document.getElementById('apiKeySeparator');
 
-// Sensitivity levels mapping for the slider
+// Sensitivity levels mapping
 const SENSITIVITY_LEVELS = {
     1: { name: "Light Scan", value: "light", gradient: "linear-gradient(to right, #6EE7B7, #34D399)", trackClass: "light-scan-track" },
     2: { name: "Medium Scan", value: "medium", gradient: "linear-gradient(to right, #FCD34D, #FBBF24)", trackClass: "medium-scan-track" },
@@ -36,14 +46,16 @@ const SENSITIVITY_LEVELS = {
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize API Key status and visibility
     chrome.storage.local.get(['geminiApiKey'], (result) => {
-        if (result.geminiApiKey) {
-            apiKeyStatus.textContent = 'API Key is set.';
-            apiKeyStatus.className = 'status success'; // Use new class
-            if (startScanButton) startScanButton.disabled = false;
-        } else {
-            apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
-            apiKeyStatus.className = 'status error'; // Use new class
-            if (startScanButton) startScanButton.disabled = true;
+        if (apiKeyStatus && startScanButton) { // Ensure elements exist
+            if (result.geminiApiKey) {
+                apiKeyStatus.textContent = 'API Key is set.';
+                apiKeyStatus.className = 'status success';
+                startScanButton.disabled = false;
+            } else {
+                apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
+                apiKeyStatus.className = 'status error';
+                startScanButton.disabled = true;
+            }
         }
     });
 
@@ -51,77 +63,84 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (chrome.runtime.lastError || !tabs || tabs.length === 0) {
             console.error("Error querying tabs or no active tab found.");
+            showMainAnalysisView(); // Default to main view on error
             return;
         }
         const tabId = tabs[0].id;
-        // Performance.getEntriesByType is not always available in extensions, especially on first open.
-        // A simpler check might be needed if this causes issues, or rely on onUpdated listener in background.
         let isReload = false;
         try {
             const navEntries = performance.getEntriesByType("navigation");
             isReload = navEntries && navEntries.length > 0 && navEntries[0].type === "reload";
         } catch (e) {
             console.warn("performance.getEntriesByType not available or failed:", e);
-            // Fallback: if popup is opened, assume it's not a reload for state restoration purposes,
-            // background script handles clearing state on actual tab reloads.
         }
 
-
         if (isReload) {
-            console.log("Page reloaded, clearing results from popup.js");
-            clearResults(); // Clear results on page reload
-            chrome.storage.local.remove(`popupState_${tabId}`); // Also clear stored state for this tab
+            console.log("Page reloaded, clearing results and state from popup.js");
+            clearResults();
+            chrome.storage.local.remove(`popupState_${tabId}`);
+            showMainAnalysisView(); // Default to main view
         } else {
-            restorePopupState(tabId); // Restore state if not a reload
+            restorePopupState(tabId); // This will also handle setting the correct view
         }
     });
 
-    // Set initial slider label and track color
-    if (scanSensitivitySlider) { // Check if element exists
+    // Set initial slider label and track color (if slider exists on current view)
+    if (scanSensitivitySlider) {
         updateSliderAppearance(scanSensitivitySlider.value);
     }
 
-
-    // Event listener for API key toggle button
-    if (toggleApiKeyButton) toggleApiKeyButton.addEventListener('click', toggleApiKeyInputArea);
-
-    // Event listener for Info toggle button
-    if (toggleInfoButton) toggleInfoButton.addEventListener('click', toggleInfoArea);
-
-    // Event listener for saving API key
-    if (saveApiKeyButton) saveApiKeyButton.addEventListener('click', saveApiKey);
-
-    // Event listener for slider input
-    if (scanSensitivitySlider) {
+    // Event listeners
+    if(toggleApiKeyButton) toggleApiKeyButton.addEventListener('click', toggleApiKeyInputArea);
+    if(toggleInfoButton) toggleInfoButton.addEventListener('click', toggleInfoArea);
+    if(saveApiKeyButton) saveApiKeyButton.addEventListener('click', saveApiKey);
+    
+    if(scanSensitivitySlider) {
         scanSensitivitySlider.addEventListener('input', (event) => {
             updateSliderAppearance(event.target.value);
         });
     }
-
-    // Event listener for the "Start Scan" button
-    if (startScanButton) {
+    
+    if(startScanButton) {
         startScanButton.addEventListener('click', () => {
+            if (!scanSensitivitySlider) return;
             const sensitivityValue = scanSensitivitySlider.value;
             const selectedSensitivity = SENSITIVITY_LEVELS[sensitivityValue]?.value || "light";
-
             console.log(`Start Scan button clicked. Sensitivity: ${selectedSensitivity}`);
             clearResults();
             showLoading(true);
-            sendHighlightRequestToContentScript(null); // Clear previous highlights
+            sendHighlightRequestToContentScript(null);
             analyzeTextQuery(selectedSensitivity);
         });
     }
+
+    if(toggleDomainsViewButton) toggleDomainsViewButton.addEventListener('click', showUnreliableDomainsView);
+    if(backToAnalysisButton) backToAnalysisButton.addEventListener('click', showMainAnalysisView);
 });
+
+// --- View Switching Functions ---
+function showMainAnalysisView() {
+    if(mainAnalysisView) mainAnalysisView.style.display = 'flex';
+    if(unreliableDomainsView) unreliableDomainsView.style.display = 'none';
+    if(popupTitle) popupTitle.textContent = 'MisinformShield';
+}
+
+function showUnreliableDomainsView() {
+    if(mainAnalysisView) mainAnalysisView.style.display = 'none';
+    if(unreliableDomainsView) unreliableDomainsView.style.display = 'flex';
+    if(popupTitle) popupTitle.textContent = 'Listed Domains';
+    fetchAndDisplayUnreliableDomains();
+}
 
 
 // --- API Key Handling Functions ---
 function toggleApiKeyInputArea() {
-    if (!apiKeyInputArea || !apiKeySeparator || !apiKeyStatus) return;
+    if(!apiKeyInputArea || !apiKeySeparator || !apiKeyStatus) return;
     const isHidden = apiKeyInputArea.style.display === 'none';
     apiKeyInputArea.style.display = isHidden ? 'block' : 'none';
     apiKeySeparator.style.display = isHidden ? 'block' : 'none';
 
-    if (isHidden) { // When showing the input area
+    if (isHidden) { 
         chrome.storage.local.get(['geminiApiKey'], (result) => {
             if (!result.geminiApiKey) {
                 apiKeyStatus.textContent = 'Enter your Gemini API Key below.';
@@ -131,7 +150,7 @@ function toggleApiKeyInputArea() {
                 apiKeyStatus.className = 'status success';
             }
         });
-    } else { // When hiding, revert status based on whether key is actually saved
+    } else { 
         chrome.storage.local.get(['geminiApiKey'], (result) => {
             if (result.geminiApiKey) {
                 apiKeyStatus.textContent = 'API Key is set.';
@@ -152,7 +171,7 @@ function toggleInfoArea() {
 }
 
 function saveApiKey() {
-    if (!apiKeyInput || !apiKeyStatus || !startScanButton) return;
+    if(!apiKeyInput || !apiKeyStatus || !startScanButton) return;
     const apiKey = apiKeyInput.value.trim();
     if (apiKey) {
         chrome.storage.local.set({ geminiApiKey: apiKey }, () => {
@@ -174,20 +193,98 @@ function saveApiKey() {
 
 // --- Slider UI Update Function ---
 function updateSliderAppearance(value) {
-    if (!scanSensitivityLabel || !scanSensitivitySlider) return;
+    if(!scanSensitivityLabel || !scanSensitivitySlider) return;
     const level = SENSITIVITY_LEVELS[value];
     if (level) {
         scanSensitivityLabel.textContent = level.name;
         scanSensitivityLabel.style.backgroundImage = level.gradient;
-        
         scanSensitivitySlider.classList.remove('light-scan-track', 'medium-scan-track', 'deep-scan-track');
         scanSensitivitySlider.classList.add(level.trackClass);
     }
 }
 
+// --- Unreliable Domains Logic ---
+function fetchAndDisplayUnreliableDomains() {
+    if(!domainsTableContainer) return;
+    domainsTableContainer.innerHTML = '<p class="table-message table-loading">Loading domains...</p>';
+
+    chrome.runtime.sendMessage({ action: "getUnreliableDomains" }, (response) => {
+        if (chrome.runtime.lastError) {
+            console.error("Error fetching unreliable domains:", chrome.runtime.lastError.message);
+            domainsTableContainer.innerHTML = `<p class="table-message table-error">Error: ${chrome.runtime.lastError.message}</p>`;
+            return;
+        }
+        if (response && response.success) {
+            renderDomainsTable(response.data);
+        } else {
+            console.error("Failed to fetch unreliable domains:", response ? response.error : "No response");
+            domainsTableContainer.innerHTML = `<p class="table-message table-error">Failed to load domains: ${response ? response.error : 'Unknown error'}</p>`;
+        }
+    });
+}
+
+function renderDomainsTable(domains) {
+    if(!domainsTableContainer) return;
+    if (!domains || domains.length === 0) {
+        domainsTableContainer.innerHTML = '<p class="table-message table-empty">No domains listed yet.</p>';
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'domains-table';
+    
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+        <tr>
+            <th class="col-id">ID</th>
+            <th class="col-url">Domain URL</th>
+            <th class="col-reliability">Reliability</th>
+            <th class="col-reason">Reason</th>
+        </tr>
+    `;
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    domains.forEach(domain => {
+        const row = tbody.insertRow();
+        
+        const cellId = row.insertCell();
+        cellId.textContent = domain.domain_id ? domain.domain_id.substring(0, 8) + '...' : 'N/A'; // Display first 8 chars of UUID
+        cellId.className = 'cell-id';
+        cellId.title = domain.domain_id || ''; // Show full ID on hover
+
+        const cellDomain = row.insertCell();
+        const domainLink = document.createElement('a');
+        const urlString = String(domain.domain_url);
+        domainLink.href = urlString.startsWith('http') ? urlString : `http://${urlString}`;
+        domainLink.textContent = domain.domain_url;
+        domainLink.target = "_blank"; 
+        domainLink.rel = "noopener noreferrer";
+        cellDomain.appendChild(domainLink);
+        cellDomain.className = 'cell-url';
+
+        const cellReliability = row.insertCell();
+        cellReliability.textContent = domain.reliability;
+        cellReliability.className = 'cell-reliability reliability-cell'; // Keep existing class for centering
+
+        const cellReason = row.insertCell();
+        cellReason.textContent = domain.reason || 'N/A'; // Display reason or N/A
+        cellReason.className = 'cell-reason';
+        if (domain.reason && domain.reason.length > 50) { // Add title for long reasons
+            cellReason.title = domain.reason;
+            cellReason.textContent = domain.reason.substring(0, 47) + '...';
+        }
+
+    });
+    table.appendChild(tbody);
+
+    domainsTableContainer.innerHTML = ''; 
+    domainsTableContainer.appendChild(table);
+}
+
 
 // --- Analysis Logic ---
-function analyzeTextQuery(sens) { // 'sens' is the sensitivity from slider
+function analyzeTextQuery(sens) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (chrome.runtime.lastError || !tabs || tabs.length === 0 || !tabs[0].id) {
             showError("Could not find active tab. Please ensure a page is loaded and try again.");
@@ -205,7 +302,7 @@ function analyzeTextQuery(sens) { // 'sens' is the sensitivity from slider
                 }
                 if (response && response.success && response.text) {
                     chrome.runtime.sendMessage(
-                        { action: "analyzeText", text: response.text, sens: sens }, // Pass sensitivity
+                        { action: "analyzeText", text: response.text, sens: sens },
                         (analysisResponse) => {
                             showLoading(false);
                             if (chrome.runtime.lastError) {
@@ -213,10 +310,9 @@ function analyzeTextQuery(sens) { // 'sens' is the sensitivity from slider
                                 showError(`Analysis failed: ${chrome.runtime.lastError.message}`);
                                 return;
                             }
-
                             if (analysisResponse && analysisResponse.success) {
-                                displayAnalysisResults(analysisResponse, activeTabId, sens); // Pass sens for highlighting
-                                savePopupState(activeTabId); // Save state after successful analysis
+                                displayAnalysisResults(analysisResponse, activeTabId, sens);
+                                savePopupState(activeTabId);
                             } else {
                                 showError(analysisResponse.error || "Analysis failed. Check background logs.");
                             }
@@ -232,51 +328,16 @@ function analyzeTextQuery(sens) { // 'sens' is the sensitivity from slider
 }
 
 function displayAnalysisResults(analysisResponse, activeTabId, sens) {
-    // Display score bar
     if (typeof analysisResponse.score !== 'undefined') {
         displayScoreBar(analysisResponse.score, analysisResponse.domainInfo);
     } else {
-        if (scoreTextDisplayDiv) scoreTextDisplayDiv.textContent = 'Score N/A';
-        if (progressBarDiv) {
+        if(scoreTextDisplayDiv) scoreTextDisplayDiv.textContent = 'Score N/A';
+        if(progressBarDiv) {
             progressBarDiv.style.width = '0%';
-            progressBarDiv.className = 'progress-bar'; // Reset color
+            progressBarDiv.className = 'progress-bar';
         }
     }
-
-    // Display Domain Warning (using your existing logic structure)
-    if (domainWarningDiv && analysisResponse.domainInfo && typeof analysisResponse.domainInfo.reliability === 'number') {
-        const reliability = analysisResponse.domainInfo.reliability;
-        const domain = analysisResponse.domainInfo.name || "Current domain";
-        
-        domainWarningDiv.style.display = 'block';
-        domainWarningDiv.style.marginTop = '10px'; // from new CSS
-        domainWarningDiv.style.padding = '10px';   // from new CSS
-        domainWarningDiv.style.borderWidth = '1px';// from new CSS
-        domainWarningDiv.style.borderStyle = 'solid';// from new CSS
-        domainWarningDiv.style.borderRadius = '6px';// from new CSS
-
-        if (reliability <= 5) { // Unreliable
-            domainWarningDiv.textContent = `⚠️ Warning: "${domain}" is often linked to unreliable info (Reliability: ${reliability}/10).`;
-            domainWarningDiv.style.color = '#856404'; // Dark yellow/brown text
-            domainWarningDiv.style.backgroundColor = '#fff3cd'; // Light yellow background
-            domainWarningDiv.style.borderColor = '#ffeeba'; // Yellowish border
-        } else if (reliability >= 9) { // Highly reliable
-            domainWarningDiv.textContent = `✅ Trusted Source: "${domain}" has a high reliability rating (${reliability}/10).`;
-            domainWarningDiv.style.color = '#155724'; // Dark green text
-            domainWarningDiv.style.backgroundColor = '#d4edda'; // Light green background
-            domainWarningDiv.style.borderColor = '#c3e6cb'; // Greenish border
-        } else { // Medium reliability
-            domainWarningDiv.textContent = `ℹ️ Info: "${domain}" has a moderate reliability score (${reliability}/10). Interpret with care.`;
-            domainWarningDiv.style.color = '#004085'; // Dark blue text
-            domainWarningDiv.style.backgroundColor = '#cce5ff'; // Light blue background
-            domainWarningDiv.style.borderColor = '#b8daff'; // Bluish border
-        }
-    } else if (domainWarningDiv) {
-        domainWarningDiv.style.display = 'none'; // Hide if no info
-    }
-
-
-    // Send flags to content script for highlighting
+    displayDomainWarning(analysisResponse.domainInfo);
     if (analysisResponse.flags && analysisResponse.flags.length > 0) {
         sendHighlightRequestToContentScript(analysisResponse.flags, activeTabId, sens);
     } else {
@@ -284,38 +345,46 @@ function displayAnalysisResults(analysisResponse, activeTabId, sens) {
     }
 }
 
+function displayDomainWarning(domainInfo) {
+    if(!domainWarningDiv) return;
+    if (domainInfo && typeof domainInfo.reliability === 'number') {
+        const reliability = domainInfo.reliability;
+        const domain = domainInfo.name || "Current domain";
+        
+        domainWarningDiv.style.display = 'block';
+        if (reliability <= 5) { 
+            domainWarningDiv.textContent = `⚠️ Warning: "${domain}" is often linked to unreliable info (Reliability: ${reliability}/10).`;
+            domainWarningDiv.className = 'warning-message reliability-low';
+        } else if (reliability >= 9) { 
+            domainWarningDiv.textContent = `✅ Trusted Source: "${domain}" has a high reliability rating (${reliability}/10).`;
+            domainWarningDiv.className = 'warning-message reliability-high';
+        } else { 
+            domainWarningDiv.textContent = `ℹ️ Info: "${domain}" has a moderate reliability score (${reliability}/10). Interpret with care.`;
+            domainWarningDiv.className = 'warning-message reliability-medium';
+        }
+    } else {
+        domainWarningDiv.style.display = 'none'; 
+        domainWarningDiv.className = 'warning-message';
+    }
+}
+
 // --- Popup State Management ---
 function savePopupState(tabId) {
     const state = {
-        domainWarning: domainWarningDiv ? {
-            text: domainWarningDiv.textContent,
-            style: { // Capture all relevant styles applied by JS
-                display: domainWarningDiv.style.display,
-                color: domainWarningDiv.style.color,
-                backgroundColor: domainWarningDiv.style.backgroundColor,
-                borderColor: domainWarningDiv.style.borderColor,
-                marginTop: domainWarningDiv.style.marginTop,
-                padding: domainWarningDiv.style.padding,
-                borderWidth: domainWarningDiv.style.borderWidth,
-                borderStyle: domainWarningDiv.style.borderStyle,
-                borderRadius: domainWarningDiv.style.borderRadius,
-            }
-        } : null,
-        scoreTextDisplay: scoreTextDisplayDiv && progressBarDiv ? {
-            text: scoreTextDisplayDiv.textContent,
-            width: progressBarDiv.style.width,
-            className: progressBarDiv.className
-        } : null,
+        currentView: mainAnalysisView && mainAnalysisView.style.display !== 'none' ? 'main' : 'domains',
+        domainWarningText: domainWarningDiv ? domainWarningDiv.textContent : null,
+        domainWarningDisplay: domainWarningDiv ? domainWarningDiv.style.display : null,
+        domainWarningClassName: domainWarningDiv ? domainWarningDiv.className : null,
+        scoreTextDisplayText: scoreTextDisplayDiv ? scoreTextDisplayDiv.textContent : null,
+        progressBarWidth: progressBarDiv ? progressBarDiv.style.width : null,
+        progressBarClassName: progressBarDiv ? progressBarDiv.className : null,
         resultsDisplay: resultsDiv ? resultsDiv.style.display : null,
         errorText: errorP ? errorP.textContent : null,
-        sliderValue: scanSensitivitySlider ? scanSensitivitySlider.value : "1" // Save slider position
+        sliderValue: scanSensitivitySlider ? scanSensitivitySlider.value : "1"
     };
     chrome.storage.local.set({ [`popupState_${tabId}`]: state }, () => {
-        if (chrome.runtime.lastError) {
-            console.error("Error saving popup state:", chrome.runtime.lastError.message);
-        } else {
-            console.log("Popup state saved for tab:", tabId);
-        }
+        if (chrome.runtime.lastError) console.error("Error saving popup state:", chrome.runtime.lastError.message);
+        else console.log("Popup state saved for tab:", tabId, state);
     });
 }
 
@@ -324,143 +393,103 @@ function restorePopupState(tabId) {
     chrome.storage.local.get([key], (data) => {
         if (chrome.runtime.lastError) {
             console.error("Error restoring popup state:", chrome.runtime.lastError.message);
+            showMainAnalysisView(); 
             return;
         }
         const state = data[key];
         if (!state) {
-            clearResults(); // If no state, ensure UI is clear
-            if (scanSensitivitySlider) updateSliderAppearance(scanSensitivitySlider.value || "1");
+            clearResults();
+            if(scanSensitivitySlider) updateSliderAppearance(scanSensitivitySlider.value || "1");
+            showMainAnalysisView(); 
             return;
         }
 
         console.log("Restoring popup state for tab:", tabId, state);
 
-        if (state.domainWarning && domainWarningDiv) {
-            domainWarningDiv.textContent = state.domainWarning.text;
-            Object.assign(domainWarningDiv.style, state.domainWarning.style);
-        } else if (domainWarningDiv) {
-            domainWarningDiv.style.display = 'none';
+        if (state.currentView === 'domains') {
+            showUnreliableDomainsView();
+        } else {
+            showMainAnalysisView();
         }
 
-        if (state.scoreTextDisplay && scoreTextDisplayDiv && progressBarDiv) {
-            scoreTextDisplayDiv.textContent = state.scoreTextDisplay.text;
-            progressBarDiv.style.width = state.scoreTextDisplay.width;
-            progressBarDiv.className = state.scoreTextDisplay.className;
-        } else if (scoreTextDisplayDiv && progressBarDiv) {
-            scoreTextDisplayDiv.textContent = '-- / 100';
-            progressBarDiv.style.width = '0%';
-            progressBarDiv.className = 'progress-bar';
+        if (domainWarningDiv) {
+            domainWarningDiv.textContent = state.domainWarningText || '';
+            domainWarningDiv.style.display = state.domainWarningDisplay || 'none';
+            domainWarningDiv.className = state.domainWarningClassName || 'warning-message';
+        }
+
+        if (scoreTextDisplayDiv) scoreTextDisplayDiv.textContent = state.scoreTextDisplayText || '-- / 100';
+        if (progressBarDiv) {
+            progressBarDiv.style.width = state.progressBarWidth || '0%';
+            progressBarDiv.className = state.progressBarClassName || 'progress-bar';
         }
         
-        if (state.resultsDisplay && resultsDiv) {
-            resultsDiv.style.display = state.resultsDisplay;
-        } else if (resultsDiv) {
-            resultsDiv.style.display = 'none';
-        }
+        if (resultsDiv) resultsDiv.style.display = state.resultsDisplay || 'none';
+        if (errorP) errorP.textContent = state.errorText || '';
 
-        if (state.errorText && errorP) {
-            errorP.textContent = state.errorText;
-        } else if (errorP) {
-            errorP.textContent = '';
-        }
-
-        if (state.sliderValue && scanSensitivitySlider) {
-            scanSensitivitySlider.value = state.sliderValue;
-            updateSliderAppearance(state.sliderValue); // Update label and colors
-        } else if (scanSensitivitySlider) {
-             updateSliderAppearance("1"); // Default if not in state
+        if (scanSensitivitySlider) {
+            scanSensitivitySlider.value = state.sliderValue || "1";
+            updateSliderAppearance(scanSensitivitySlider.value);
         }
         
-        // If results are visible, it implies a scan was done, so keep button enabled
-        // unless loading is also part of state (which it isn't currently)
-         if (startScanButton) {
-            const apiKeyIsSet = apiKeyStatus && apiKeyStatus.className.includes('success');
-            startScanButton.disabled = !apiKeyIsSet; // Only enable if API key is set
+        if (startScanButton && apiKeyStatus) {
+            const apiKeyIsSet = apiKeyStatus.className.includes('success');
+            startScanButton.disabled = !apiKeyIsSet;
         }
     });
 }
 
-
 // --- Helper Functions ---
 function sendHighlightRequestToContentScript(flags, tabId, sens) {
-    const action = { action: "highlightText", flags: flags, sens: sens }; // Pass sensitivity
+    const action = { action: "highlightText", flags: flags, sens: sens };
+    const callback = response => { if (chrome.runtime.lastError) console.warn("Could not send highlight request:", chrome.runtime.lastError.message); };
     if (!tabId) {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs && tabs.length > 0 && tabs[0].id) {
-                chrome.tabs.sendMessage(tabs[0].id, action, response => {
-                    if (chrome.runtime.lastError) {
-                        console.warn("Could not send highlight request (no tabId):", chrome.runtime.lastError.message);
-                    }
-                });
-            }
+            if (tabs && tabs.length > 0 && tabs[0].id) chrome.tabs.sendMessage(tabs[0].id, action, callback);
         });
     } else {
-        chrome.tabs.sendMessage(tabId, action, response => {
-             if (chrome.runtime.lastError) {
-                console.warn("Could not send highlight request (with tabId):", chrome.runtime.lastError.message);
-            }
-        });
+        chrome.tabs.sendMessage(tabId, action, callback);
     }
 }
 
 function displayScoreBar(score, domainInfo) {
-    if (!resultsDiv || !errorP || !scoreTextDisplayDiv || !progressBarDiv) return; // Element checks
+    if(!resultsDiv || !errorP || !scoreTextDisplayDiv || !progressBarDiv) return;
     const numericScore = Math.max(0, Math.min(100, Number(score)));
-    resultsDiv.style.display = 'flex'; // Use flex as per new CSS
+    resultsDiv.style.display = 'flex';
     errorP.textContent = '';
-
     scoreTextDisplayDiv.textContent = `${numericScore} / 100`;
-
-    let colorClass = 'score-red'; // Default
-    // Using your original score thresholds for colors:
+    let colorClass = 'score-red';
     if (numericScore >= 90) colorClass = 'score-green';
     else if (numericScore >= 70) colorClass = 'score-yellow';
-
-
     progressBarDiv.style.width = `${numericScore}%`;
-    progressBarDiv.className = 'progress-bar'; // Reset classes
+    progressBarDiv.className = 'progress-bar';
     progressBarDiv.classList.add(colorClass);
 
-    // Log domain if it's not marked unreliable and scores low (your existing logic)
     if (domainInfo && !domainInfo.isUnreliable && numericScore <= 50 && domainInfo.name) {
-        chrome.runtime.sendMessage({
-            action: "logNewUnreliableDomain",
-            score: numericScore,
-            domain: domainInfo.name
-        }, response => {
-            if (chrome.runtime.lastError) {
-                console.warn("Error logging unreliable domain:", chrome.runtime.lastError.message);
-            }
-        });
+        chrome.runtime.sendMessage({ action: "logNewUnreliableDomain", score: numericScore, domain: domainInfo.name }, 
+            response => { if (chrome.runtime.lastError) console.warn("Error logging unreliable domain:", chrome.runtime.lastError.message); }
+        );
     }
 }
 
 function showLoading(isLoading) {
-    if (loadingIndicator) loadingIndicator.style.display = isLoading ? 'flex' : 'none'; // Use flex for spinner
+    if(loadingIndicator) loadingIndicator.style.display = isLoading ? 'flex' : 'none';
     if (startScanButton) startScanButton.disabled = isLoading;
     if (scanSensitivitySlider) scanSensitivitySlider.disabled = isLoading;
 }
 
 function showError(message) {
     if (resultsDiv) resultsDiv.style.display = 'none';
-    if (errorP) errorP.textContent = `Error: ${message}`; // errorP has class error-message in new HTML
+    if (errorP) errorP.textContent = `Error: ${message}`;
     console.error("Error displayed to user:", message);
-    showLoading(false); // Ensure loading is hidden on error
+    showLoading(false);
 }
 
 function clearResults() {
     if (scoreTextDisplayDiv) scoreTextDisplayDiv.textContent = '-- / 100';
-    if (progressBarDiv) {
-        progressBarDiv.style.width = '0%';
-        progressBarDiv.className = 'progress-bar';
-    }
-    if (analysisRawTextPre) { // Check if it exists
-        analysisRawTextPre.textContent = '';
-        analysisRawTextPre.style.display = 'none';
-    }
+    if (progressBarDiv) { progressBarDiv.style.width = '0%'; progressBarDiv.className = 'progress-bar'; }
     if (errorP) errorP.textContent = '';
     if (resultsDiv) resultsDiv.style.display = 'none';
-    if (domainWarningDiv) domainWarningDiv.style.display = 'none';
-
-    sendHighlightRequestToContentScript(null); // Clear highlights on the page
+    if (domainWarningDiv) { domainWarningDiv.style.display = 'none'; domainWarningDiv.className = 'warning-message';}
+    sendHighlightRequestToContentScript(null);
 }

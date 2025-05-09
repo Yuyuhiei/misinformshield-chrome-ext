@@ -1,18 +1,19 @@
 /* General Body Styles */
 body {
-    font-family: 'Inter', sans-serif; /* Using Inter font */
-    width: 380px; /* Slightly wider for better spacing */
+    font-family: 'Inter', sans-serif;
+    width: 380px;
     padding: 16px;
-    background-color: #f8f9fa; /* Lighter background */
-    color: #212529; /* Darker text for better contrast */
+    background-color: #f8f9fa;
+    color: #212529;
     margin: 0;
     box-sizing: border-box;
+    min-height: 300px; 
 }
 
 .container {
     display: flex;
     flex-direction: column;
-    gap: 16px; /* Consistent spacing */
+    gap: 16px;
 }
 
 /* Header Section */
@@ -21,36 +22,37 @@ body {
     justify-content: space-between;
     align-items: center;
     padding-bottom: 8px;
-    border-bottom: 1px solid #dee2e6; /* Subtle separator */
+    border-bottom: 1px solid #dee2e6;
 }
 
-.header-section h1 {
-    font-size: 1.4em; /* Slightly larger title */
+.header-section h1#popupTitle { 
+    font-size: 1.3em; 
     font-weight: 600;
     color: #343a40;
     margin: 0;
     flex-grow: 1;
-    /* text-align: center; Removed to allow space for icons on the right */
+    text-align: left; 
+    padding-left: 8px; 
 }
 
 .logo-icon {
-    width: 32px; /* Adjust size as needed */
+    width: 32px;
     height: 32px;
-    margin-right: 10px; /* Space between logo and title */
+    flex-shrink: 0;
 }
 
 .header-icons {
     display: flex;
     align-items: center;
-    gap: 8px; /* Space between icons */
+    gap: 6px; 
 }
 
 .icon-button {
     background: none;
     border: none;
     cursor: pointer;
-    padding: 6px;
-    color: #6c757d; /* Muted icon color */
+    padding: 6px; 
+    color: #6c757d;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -59,13 +61,19 @@ body {
 }
 
 .icon-button:hover {
-    background-color: #e9ecef; /* Subtle hover background */
-    color: #007bff; /* Accent color on hover */
+    background-color: #e9ecef;
+    color: #007bff;
 }
 
 .icon-button svg {
-    width: 20px; /* Control SVG size */
+    width: 20px;
     height: 20px;
+}
+
+.view-section {
+    display: flex; 
+    flex-direction: column;
+    gap: 16px; 
 }
 
 
@@ -75,17 +83,17 @@ body {
     padding: 16px;
     border-radius: 8px;
     border: 1px solid #dee2e6;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); /* Softer shadow */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-.api-key-section label, .info-section label.info-title-label { /* Target specific label in info */
+.api-key-section label, .info-section label.info-title-label {
     display: block;
     margin-bottom: 8px;
-    font-weight: 600; /* Bolder labels */
-    font-size: 1em;   /* Slightly larger label */
-    color: #343a40; /* Darker label text */
+    font-weight: 600;
+    font-size: 1em;
+    color: #343a40;
 }
-.info-section .info-title-label { /* Specific styling for the title of info section */
+.info-section .info-title-label {
     text-align: center;
     margin-bottom: 12px;
     font-size: 1.1em;
@@ -115,9 +123,9 @@ body {
     box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
 }
 
-#saveApiKey { /* Renamed from original #saveApiKeyButton for consistency */
+#saveApiKey {
     padding: 10px 15px;
-    background-color: #007bff; /* Primary blue */
+    background-color: #007bff;
     color: white;
     border: none;
     border-radius: 6px;
@@ -128,7 +136,7 @@ body {
 }
 
 #saveApiKey:hover {
-    background-color: #0056b3; /* Darker blue on hover */
+    background-color: #0056b3;
 }
 
 #apiKeyStatus {
@@ -140,18 +148,19 @@ body {
 .status.neutral { color: #6c757d; }
 
 
-hr {
+hr#apiKeySeparator, hr#infoSeparator {
     border: 0;
     height: 1px;
-    background-color: #dee2e6; /* Lighter separator */
-    margin: 16px 0;
+    background-color: #dee2e6;
+    margin: 16px 0; /* Keep specific margins for these separators */
 }
+
 
 /* Info Section Specifics */
 .scan-info-row {
     display: flex;
-    flex-direction: column; /* Stack label and text */
-    gap: 4px; /* Space between label and text */
+    flex-direction: column;
+    gap: 4px;
     padding: 8px 0;
     border-bottom: 1px solid #e9ecef;
     font-size: 0.9em;
@@ -191,47 +200,30 @@ hr {
     font-weight: 600;
     padding: 5px 10px;
     border-radius: 6px;
-    color: transparent; /* Make text transparent to show gradient */
+    color: transparent; 
     -webkit-background-clip: text;
     background-clip: text;
     transition: background-image 0.3s ease;
-    /* Default to light scan color */
     background-image: linear-gradient(to right, #6EE7B7, #34D399);
 }
 
-/* Slider Styles */
 .slider {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
-    height: 10px; /* Slimmer track */
-    background: #e9ecef; /* Light grey track background */
+    height: 10px;
+    background: #e9ecef;
     outline: none;
     opacity: 0.9;
     transition: opacity .2s, background-image 0.3s ease;
     border-radius: 5px;
     cursor: pointer;
 }
+.slider:hover { opacity: 1; }
 
-.slider:hover {
-    opacity: 1;
-}
-
-/* Slider Thumb Styles */
 .slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 22px; /* Larger thumb for easier interaction */
-    height: 22px;
-    background: #007bff; /* Blue thumb */
-    border-radius: 50%;
-    border: 2px solid #fff; /* White border around thumb */
-    box-shadow: 0 0 5px rgba(0,0,0,0.2);
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-}
-
-.slider::-moz-range-thumb {
     width: 22px;
     height: 22px;
     background: #007bff;
@@ -241,176 +233,224 @@ hr {
     cursor: pointer;
     transition: background-color 0.2s ease;
 }
+.slider::-moz-range-thumb {
+    width: 22px; height: 22px; background: #007bff; border-radius: 50%; border: 2px solid #fff;
+    box-shadow: 0 0 5px rgba(0,0,0,0.2); cursor: pointer; transition: background-color 0.2s ease;
+}
+.slider:focus::-webkit-slider-thumb { box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25); }
+.slider:focus::-moz-range-thumb { box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25); }
 
-.slider:focus::-webkit-slider-thumb {
-    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
-}
-.slider:focus::-moz-range-thumb {
-    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
-}
+.slider.light-scan-track { background-image: linear-gradient(to right, #6EE7B7, #34D399); }
+.slider.medium-scan-track { background-image: linear-gradient(to right, #FCD34D, #FBBF24); }
+.slider.deep-scan-track { background-image: linear-gradient(to right, #F87171, #EF4444); }
 
-/* Slider track colors based on value - applied via JS */
-.slider.light-scan-track {
-    background-image: linear-gradient(to right, #6EE7B7, #34D399);
-}
-.slider.medium-scan-track {
-    background-image: linear-gradient(to right, #FCD34D, #FBBF24);
-}
-.slider.deep-scan-track {
-    background-image: linear-gradient(to right, #F87171, #EF4444);
-}
-
-
-/* Scan Button */
-.scan-button { /* This is the new Start Scan button */
-    padding: 12px 20px;
-    background-color: #28a745; /* Green for go/start */
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 1em;
-    font-weight: 500;
-    width: 100%;
-    box-sizing: border-box;
-    transition: background-color 0.2s ease, transform 0.1s ease;
+.scan-button {
+    padding: 12px 20px; background-color: #28a745; color: white; border: none;
+    border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 500;
+    width: 100%; box-sizing: border-box; transition: background-color 0.2s ease, transform 0.1s ease;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
-
-.scan-button:hover {
-    background-color: #218838; /* Darker green */
-}
-.scan-button:active {
-    transform: translateY(1px); /* Subtle press effect */
-}
-.scan-button:disabled {
-    background-color: #adb5bd; /* Grey when disabled */
-    cursor: not-allowed;
-}
-
+.scan-button:hover { background-color: #218838; }
+.scan-button:active { transform: translateY(1px); }
+.scan-button:disabled { background-color: #adb5bd; cursor: not-allowed; }
 
 /* Loading Indicator */
 .loading-indicator {
-    display: flex; /* Changed to flex for alignment */
-    align-items: center;
-    justify-content: center;
-    padding: 15px;
-    font-style: italic;
-    color: #6c757d; /* Muted color */
-    gap: 8px; /* Space between spinner and text */
-    background-color: #e9ecef; /* Light background for loading */
-    border-radius: 6px;
-    margin-top: 10px;
+    display: flex; align-items: center; justify-content: center; padding: 15px;
+    font-style: italic; color: #6c757d; gap: 8px; background-color: #e9ecef;
+    border-radius: 6px; margin-top: 10px;
 }
-
 .spinner {
-    width: 20px;
-    height: 20px;
-    border: 3px solid rgba(0, 123, 255, 0.2); /* Light blue border */
-    border-top-color: #007bff; /* Blue for spinner top */
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
+    width: 20px; height: 20px; border: 3px solid rgba(0, 123, 255, 0.2);
+    border-top-color: #007bff; border-radius: 50%; animation: spin 1s linear infinite;
 }
-
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Domain Warning & Error Messages */
-.warning-message, .error-message { /* Combined for consistency, error-message was .error */
-    font-size: 0.9em;
-    margin-top: 10px;
-    padding: 10px;
-    border-radius: 6px;
-    text-align: center;
+.warning-message, .error-message {
+    font-size: 0.9em; margin-top: 10px; padding: 10px; border-radius: 6px; text-align: center;
+}
+.warning-message { 
+    border: 1px solid transparent; 
+}
+.warning-message.reliability-low {
+    color: #856404; background-color: #fff3cd; border-color: #ffeeba;
+}
+.warning-message.reliability-high {
+    color: #155724; background-color: #d4edda; border-color: #c3e6cb;
+}
+.warning-message.reliability-medium {
+    color: #004085; background-color: #cce5ff; border-color: #b8daff;
 }
 
-.warning-message { /* This will be styled further by JS based on reliability */
-    border: 1px solid transparent; /* Base border */
+.error-message {
+    color: #721c24; background-color: #f8d7da; border: 1px solid #f5c6cb; font-weight: 500;
 }
-
-.error-message { /* Styles for .error in your original CSS */
-    color: #721c24; /* Dark red text for errors */
-    background-color: #f8d7da; /* Light red background */
-    border: 1px solid #f5c6cb; /* Reddish border */
-    font-weight: 500;
-}
-
 
 /* Results Area */
 #results {
+    background-color: #ffffff; padding: 20px; border: 1px solid #dee2e6;
+    border-radius: 8px; margin-top: 10px; display: flex; flex-direction: column;
+    align-items: center; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+#results h2 {
+    font-size: 1.1em; font-weight: 600; margin-top: 0; margin-bottom: 10px; color: #495057;
+}
+.score-text-display {
+    font-size: 1.4em; font-weight: 700; color: #343a40; margin-bottom: 12px;
+}
+.progress-bar-container {
+    width: 100%; height: 22px; background-color: #e9ecef; border-radius: 11px;
+    overflow: hidden; border: 1px solid #ced4da;
+}
+.progress-bar {
+    height: 100%; width: 0%; background-color: #6c757d; border-radius: 10px;
+    transition: width 0.6s cubic-bezier(0.25, 0.1, 0.25, 1), background-color 0.6s ease;
+    display: flex; align-items: center; justify-content: center; color: white;
+    font-size: 0.8em; font-weight: 500;
+}
+.progress-bar.score-red { background-color: #e74c3c; }
+.progress-bar.score-yellow { background-color: #f39c12; }
+.progress-bar.score-green { background-color: #2ecc71; }
+
+
+/* Unreliable Domains View Styles */
+#unreliableDomainsView {
     background-color: #ffffff;
-    padding: 20px;
-    border: 1px solid #dee2e6;
+    padding: 15px; 
     border-radius: 8px;
-    margin-top: 10px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+    border: 1px solid #dee2e6;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-#results h2 {
-    font-size: 1.1em;
-    font-weight: 600;
-    margin-top: 0;
-    margin-bottom: 10px;
-    color: #495057;
-}
-
-.score-text-display {
-    font-size: 1.4em; /* Larger score text */
-    font-weight: 700; /* Bolder score */
-    color: #343a40;
-    margin-bottom: 12px;
-}
-
-.progress-bar-container {
-    width: 100%; /* Full width within results */
-    height: 22px; /* Slightly thicker bar */
-    background-color: #e9ecef;
-    border-radius: 11px; /* To match bar's radius */
-    overflow: hidden;
-    border: 1px solid #ced4da; /* Subtle border */
-}
-
-.progress-bar {
-    height: 100%;
-    width: 0%;
-    background-color: #6c757d; /* Default grey */
-    border-radius: 10px; /* Keep slightly less than container for inset look */
-    transition: width 0.6s cubic-bezier(0.25, 0.1, 0.25, 1), background-color 0.6s ease;
-    display: flex; /* For centering text if needed */
+.domains-header {
+    display: flex;
+    justify-content: space-between;
     align-items: center;
-    justify-content: center;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e9ecef;
+    margin-bottom: 10px; 
+}
+
+.domains-header .domains-title { 
+    font-size: 1.2em;
+    font-weight: 600;
+    color: #343a40;
+    margin: 0;
+    flex-grow: 1; 
+    text-align: center; 
+}
+
+.back-button {
+    background-color: transparent; 
+    color: #007bff; 
+    border: 1px solid #007bff;
+    border-radius: 6px;
+    padding: 6px 10px; 
+    font-size: 0.9em;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px; 
+    transition: background-color 0.2s ease, color 0.2s ease;
+    line-height: 1; 
+}
+
+.back-button:hover {
+    background-color: #007bff;
     color: white;
-    font-size: 0.8em;
+}
+
+.table-container {
+    width: 100%;
+    max-height: 280px; 
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background-color: #fff; 
+}
+
+.domains-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.domains-table th, .domains-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 0.9em;
+    vertical-align: middle; 
+}
+
+.domains-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+    position: sticky;
+    top: 0;
+    z-index: 1; 
+}
+
+/* Column specific styling */
+.domains-table th.col-id, .domains-table td.cell-id {
+    width: 20%; /* Adjust width for ID */
+    font-size: 0.8em; /* Smaller font for ID */
+    color: #6c757d;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.domains-table th.col-url, .domains-table td.cell-url {
+    width: 35%; /* Adjust width for URL */
+}
+.domains-table th.col-reliability, .domains-table td.cell-reliability {
+    width: 15%; /* Adjust width for Reliability */
+    text-align: center;
+}
+.domains-table th.col-reason, .domains-table td.cell-reason {
+    width: 30%; /* Adjust width for Reason */
+    font-size: 0.85em;
+    color: #495057;
+    white-space: normal; /* Allow reason to wrap */
+    word-break: break-word;
+}
+
+
+.domains-table td {
+    color: #343a40;
+    word-break: break-all; /* General rule, overridden by specific columns if needed */
+}
+.domains-table td.reliability-cell { /* Kept for backward compatibility if other JS still uses it */
+    text-align: center;
+    font-weight: 500;
+    white-space: nowrap; 
+}
+
+.domains-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.domains-table tbody tr:hover {
+    background-color: #f1f3f5;
+}
+
+.table-message { 
+    padding: 20px;
+    text-align: center;
+    font-style: italic;
+    color: #6c757d;
+}
+
+.table-message.table-error {
+    color: #721c24; 
     font-weight: 500;
 }
 
-/* Progress Bar Colors (using your original hex codes for consistency if preferred) */
-.progress-bar.score-red {
-    background-color: #e74c3c; /* Original Red */
-}
-.progress-bar.score-yellow {
-    background-color: #f39c12; /* Original Yellow/Orange */
-}
-.progress-bar.score-green {
-    background-color: #2ecc71; /* Original Green */
+.table-message.table-warning {
+    color: #856404; 
+    font-weight: 500;
 }
 
-/* Raw text styling from your original CSS, if needed */
-#analysisRawText {
-    display: none;
-    margin-top: 15px;
-    font-family: monospace;
-    font-size: 0.85em;
-    color: #555;
-    border-top: 1px dashed #ccc;
-    padding-top: 10px;
-    max-height: 100px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-}
+

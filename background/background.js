@@ -161,6 +161,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // IMPORTANT: keep this true to allow async sendResponse
         return true;
     }
+    // ADD THE NEW ACTION HANDLER HERE (OR MODIFY EXISTING ONE):
+    else if (request.action === "getUnreliableDomains") {
+        if (!supabase) { // Check if supabase client is initialized
+            console.error("Supabase client not initialized in background script.");
+            sendResponse({ success: false, error: "Database connection not ready." });
+            return false; // No async operation here if Supabase isn't ready
+        }
+        
+        console.log("Background: Received request to get unreliable domains.");
+        (async () => {
+            try {
+                // Query your 'unreliable_domain' table.
+                // Now selecting domain_id, domain_url, reliability, and reason.
+                const { data, error } = await supabase
+                    .from('unreliable_domain') 
+                    .select('domain_id, domain_url, reliability, reason') // Updated columns
+                    .order('domain_url', { ascending: true }); // Optional: order them
+
+                if (error) {
+                    console.error("Error fetching unreliable domains from Supabase:", error);
+                    sendResponse({ success: false, error: error.message || "Failed to fetch domains from database." });
+                } else {
+                    console.log("Background: Successfully fetched unreliable domains:", data);
+                    sendResponse({ success: true, data: data });
+                }
+            } catch (e) {
+                console.error("Exception while fetching unreliable domains:", e);
+                sendResponse({ success: false, error: e.message || "An unexpected error occurred while fetching domains." });
+            }
+        })();
+        return true; // Indicate that the response will be sent asynchronously
+    }
 }); // End chrome.runtime.onMessage.addListener
 
 
