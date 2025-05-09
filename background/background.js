@@ -218,7 +218,7 @@ console.log("Background script loaded (v5 - Verification Added).");
 
 // *** Function for initial text analysis and highlighting flags ***
 async function callGeminiAPIForHighlighting(textToAnalyze, apiKey, sens) {
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
     // --- Prompt Engineering for Highlighting ---
     // ** CRITICAL STEP **
@@ -252,6 +252,12 @@ Example JSON output format:
 \`\`\`
 
 If no fake or unsupported claims are found, return an empty "flags" array.
+
+Return only a compact JSON object like this:
+
+{"score": 35, "flags":[{"snippet":"...", "reason":"..."}, ...]}
+
+Do NOT wrap it in markdown or add extra text. Avoid line breaks if needed. Response must be valid JSON within token limits.
 
 Text to analyze:
 ---
@@ -293,7 +299,13 @@ Example JSON output:
 }
 \`\`\`
 
-If no issues are found, return an empty "flags" array.
+If no issues are found, return an empty "flags" array. 
+
+Return only a compact JSON object like this:
+
+{"score": 35, "flags":[{"snippet":"...", "reason":"..."}, ...]}
+
+Do NOT wrap it in markdown or add extra text. Avoid line breaks if needed. Response must be valid JSON within token limits.
 
 Text to analyze:
 ---
@@ -354,27 +366,20 @@ JSON Analysis:`;
              }
 
              try {
-                 const analysisData = JSON.parse(jsonString);
-                 console.log("Successfully parsed analysis JSON from Gemini.");
-
-                 // Validate the structure
-                 const score = (analysisData && typeof analysisData.score === 'number')
-                     ? Math.max(0, Math.min(100, analysisData.score))
-                     : 50; // Default score if missing/invalid
-                 const flags = (analysisData && Array.isArray(analysisData.flags))
-                     ? analysisData.flags.filter(f => f && typeof f.snippet === 'string' && typeof f.reason === 'string') // Basic validation
-                     : []; // Default to empty array
-
-                 console.log("Extracted Score:", score);
-                 console.log("Extracted Flags:", flags);
-
-                 return { score, flags }; // Return the parsed object
-
-             } catch (parseError) {
-                 console.error("Failed to parse JSON response from Gemini:", parseError);
-                 console.error("Received text:", jsonString); // Log what was received
-                 throw new Error("Failed to parse analysis JSON from API response.");
-             }
+                const analysisData = tryRepairJson(jsonString);
+                console.log("Successfully parsed or repaired analysis JSON.");
+            
+                const score = analysisData.score;
+                const flags = analysisData.flags;
+            
+                console.log("Extracted Score:", score);
+                console.log("Extracted Flags:", flags);
+                return { score, flags };
+            
+            } catch (parseError) {
+                console.error("Failed to parse or repair JSON:", parseError);
+                throw new Error("Invalid JSON from Gemini API and repair failed.");
+            }
 
         } else if (data.promptFeedback && data.promptFeedback.blockReason) {
             // Handle blocked prompts
@@ -392,10 +397,47 @@ JSON Analysis:`;
     }
 }
 
+function tryRepairJson(jsonString) {
+    // Step 1: Try parsing raw JSON first
+    try {
+        return JSON.parse(jsonString);
+    } catch (_) {
+        // Step 2: Fallback to repair
+        console.warn("Initial JSON parsing failed. Attempting repair...");
+
+        // Try to extract everything before the last complete object
+        const flagsStart = jsonString.indexOf('"flags": [');
+        if (flagsStart === -1) throw new Error("Missing 'flags' array in JSON.");
+
+        const flagsPart = jsonString.slice(flagsStart + 9); // Skip past `"flags": [`
+        const splitFlags = flagsPart.split('{').slice(1); // Split into flag entries (omit first empty part)
+
+        const repairedFlags = [];
+        for (const part of splitFlags) {
+            const maybeObject = `{${part}`;
+            try {
+                const fixed = maybeObject.replace(/,\s*}$/, '}'); // Remove trailing comma if any
+                repairedFlags.push(JSON.parse(fixed));
+            } catch {
+                break; // Stop at first incomplete/corrupt object
+            }
+        }
+
+        const scoreMatch = jsonString.match(/"score"\s*:\s*(\d+)/);
+        const score = scoreMatch ? Math.max(0, Math.min(100, parseInt(scoreMatch[1], 10))) : 50;
+
+        return {
+            score,
+            flags: repairedFlags
+        };
+    }
+}
+
 
 // *** NEW: Function to verify a snippet and get sources ***
 async function verifySnippetWithSources(snippet, reason, apiKey, sens) {
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const SERPAPI_URL = 'https://serpapi.com/search.json';
 
     // --- Prompt Engineering based on sensitivity ---
     let prompt = "";
@@ -405,34 +447,19 @@ async function verifySnippetWithSources(snippet, reason, apiKey, sens) {
 Snippet: "${snippet}"
 Reason: "${reason}"
 
-Please perform the following tasks based *only* on the provided snippet and reason:
+Please do the following:
+1. Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic, focusing on how it could be misleading, unsubstantiated, or concerning given the reason.
+2. Create a concise search query (under 20 words) that could help find supporting or contradicting *credible sources* (e.g., news articles, official reports) for the claims or ideas in the snippet.
 
-1. **Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic, focusing on the reasoning behind the concern. Explain how the snippet could be misleading, unsubstantiated, or problematic according to the reason provided.
-    
-2. **Find Sources:** Search the web for **3 highly credible and relevant sources** that provide context, evidence, or fact-based information related to the explanation. Use reputable sources such as:
-    - Reputable news organizations (e.g., BBC, New York Times)
-    - Academic institutions (e.g., universities or research papers)
-    - Established fact-checking sites (e.g., Snopes, FactCheck.org)
-
-    **Important guidelines for finding sources:**
-    - Avoid unreliable sources such as opinion blogs or sites with questionable credibility.
-    - Make sure the sources are directly related to the explanation and provide factual support.
-    
-    If you cannot find 3 credible sources, provide as many as you can and leave the rest as empty strings (""). If you can't provide any credible sources, return empty strings for all sources.
-
-Provide your response strictly in the following JSON format:
+Respond strictly in this JSON format:
 \`\`\`json
 {
-    "summary": "Your 2-3 sentence explanation here.",
-    "sources": [
-        "URL of source 1",
-        "URL of source 2",
-        "URL of source 3"
-    ]
+  "summary": "Your 2-3 sentence explanation here."
+  "search_query": "A focused Google search query for finding credible sources."
 }
 \`\`\`
 
-If you cannot find 3 credible sources, provide as many as you can find (minimum 1 if possible) and leave the remaining entries as empty strings (""). If you cannot provide a meaningful explanation or find any sources, return an empty summary and an empty sources array. Ensure the entire output is valid JSON.
+Return only valid JSON.
 
 JSON Verification:`;
     } else {
@@ -442,17 +469,16 @@ JSON Verification:`;
 Snippet: "${snippet}"
 Reason: "${reason}"
 
-Please explain in 2-3 sentences why this snippet might be considered problematic based on the reason provided. Focus on a clear, unbiased explanation. Do not search the web or include any sources.
+Please explain in 2-3 sentences why this snippet might be considered problematic based on the reason provided. Focus on a clear, unbiased explanation.
 
 Return the response in the following JSON format:
 \`\`\`json
 {
     "summary": "Your explanation here.",
-    "sources": []
 }
 \`\`\`
 
-If no meaningful explanation can be provided, return an empty summary and an empty array for sources. Ensure valid JSON output.
+If no meaningful explanation can be provided, return an empty summary. Ensure valid JSON output.
 
 JSON Verification:`;
     }
@@ -506,9 +532,38 @@ JSON Verification:`;
                 const summary = (verificationData && typeof verificationData.summary === 'string')
                     ? verificationData.summary.trim()
                     : "Could not generate explanation.";
-                const sources = (verificationData && Array.isArray(verificationData.sources))
-                    ? verificationData.sources.filter(s => typeof s === 'string' && s.trim().startsWith('http')) // Ensure they are strings and look like URLs
-                    : [];
+                
+                const searchQuery = (verificationData && typeof verificationData.search_query === 'string')
+                    ? verificationData.search_query.trim()
+                    : null;
+
+                let sources = [];
+                let serpApiKey = 'f07c21bcf1e4c3b1e93afd4230ebe0a3a9193394c0a4762db6822ca165017c8a';
+
+                if (sens === 'deep') {
+                    // --- SerpAPI Integration ---
+                    if (!searchQuery) {
+                        throw new Error("No valid search query generated from Gemini.");
+                    }
+                    const serpResponse = await fetch(
+                        `${SERPAPI_URL}?q=${encodeURIComponent(searchQuery)}&api_key=${serpApiKey}`
+                    );
+                    if (!serpResponse.ok) {
+                        console.error('SerpAPI request failed:', await serpResponse.text());
+                        throw new Error('Failed to fetch supporting sources from SerpAPI.');
+                    }
+                    const serpData = await serpResponse.json();
+                    const organicResults = serpData.organic_results || [];
+                    sources = organicResults
+                        .filter((result) => result.link && typeof result.link === 'string')
+                        .slice(0, 3)
+                        .map((result) => result.link);
+
+                    // Pad with empty strings if less than 3 sources
+                    while (sources.length < 3) {
+                        sources.push('');
+                    }
+                }
 
                 console.log("Extracted Summary:", summary);
                 console.log("Extracted Sources:", sources);
