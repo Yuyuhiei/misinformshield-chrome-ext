@@ -7,7 +7,7 @@ body {
     color: #212529;
     margin: 0;
     box-sizing: border-box;
-    min-height: 300px; 
+    min-height: auto; /* Popup doesn't need to fill screen */
 }
 
 .container {
@@ -70,7 +70,7 @@ body {
     height: 20px;
 }
 
-.view-section {
+.view-section { /* This class is still useful for the mainAnalysisView */
     display: flex; 
     flex-direction: column;
     gap: 16px; 
@@ -152,7 +152,7 @@ hr#apiKeySeparator, hr#infoSeparator {
     border: 0;
     height: 1px;
     background-color: #dee2e6;
-    margin: 16px 0; /* Keep specific margins for these separators */
+    margin: 16px 0; 
 }
 
 
@@ -313,144 +313,4 @@ hr#apiKeySeparator, hr#infoSeparator {
 .progress-bar.score-yellow { background-color: #f39c12; }
 .progress-bar.score-green { background-color: #2ecc71; }
 
-
-/* Unreliable Domains View Styles */
-#unreliableDomainsView {
-    background-color: #ffffff;
-    padding: 15px; 
-    border-radius: 8px;
-    border: 1px solid #dee2e6;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-.domains-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #e9ecef;
-    margin-bottom: 10px; 
-}
-
-.domains-header .domains-title { 
-    font-size: 1.2em;
-    font-weight: 600;
-    color: #343a40;
-    margin: 0;
-    flex-grow: 1; 
-    text-align: center; 
-}
-
-.back-button {
-    background-color: transparent; 
-    color: #007bff; 
-    border: 1px solid #007bff;
-    border-radius: 6px;
-    padding: 6px 10px; 
-    font-size: 0.9em;
-    font-weight: 500;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 4px; 
-    transition: background-color 0.2s ease, color 0.2s ease;
-    line-height: 1; 
-}
-
-.back-button:hover {
-    background-color: #007bff;
-    color: white;
-}
-
-.table-container {
-    width: 100%;
-    max-height: 280px; 
-    overflow-y: auto;
-    border: 1px solid #dee2e6;
-    border-radius: 6px;
-    background-color: #fff; 
-}
-
-.domains-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.domains-table th, .domains-table td {
-    padding: 10px 12px;
-    text-align: left;
-    border-bottom: 1px solid #e9ecef;
-    font-size: 0.9em;
-    vertical-align: middle; 
-}
-
-.domains-table th {
-    background-color: #f8f9fa;
-    font-weight: 600;
-    color: #495057;
-    position: sticky;
-    top: 0;
-    z-index: 1; 
-}
-
-/* Column specific styling */
-.domains-table th.col-id, .domains-table td.cell-id {
-    width: 20%; /* Adjust width for ID */
-    font-size: 0.8em; /* Smaller font for ID */
-    color: #6c757d;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.domains-table th.col-url, .domains-table td.cell-url {
-    width: 35%; /* Adjust width for URL */
-}
-.domains-table th.col-reliability, .domains-table td.cell-reliability {
-    width: 15%; /* Adjust width for Reliability */
-    text-align: center;
-}
-.domains-table th.col-reason, .domains-table td.cell-reason {
-    width: 30%; /* Adjust width for Reason */
-    font-size: 0.85em;
-    color: #495057;
-    white-space: normal; /* Allow reason to wrap */
-    word-break: break-word;
-}
-
-
-.domains-table td {
-    color: #343a40;
-    word-break: break-all; /* General rule, overridden by specific columns if needed */
-}
-.domains-table td.reliability-cell { /* Kept for backward compatibility if other JS still uses it */
-    text-align: center;
-    font-weight: 500;
-    white-space: nowrap; 
-}
-
-.domains-table tbody tr:last-child td {
-    border-bottom: none;
-}
-
-.domains-table tbody tr:hover {
-    background-color: #f1f3f5;
-}
-
-.table-message { 
-    padding: 20px;
-    text-align: center;
-    font-style: italic;
-    color: #6c757d;
-}
-
-.table-message.table-error {
-    color: #721c24; 
-    font-weight: 500;
-}
-
-.table-message.table-warning {
-    color: #856404; 
-    font-weight: 500;
-}
-
-
+/* Styles for Unreliable Domains View in popup are REMOVED as it's now a separate page */

@@ -1,0 +1,169 @@
+/* domains_table.css */
+body {
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f8f9fa; /* Light grey background for the page */
+    color: #212529;
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.page-container {
+    width: 100%;
+    max-width: 1200px; /* Max width for content, centered */
+    margin: 0 auto;
+    padding: 20px;
+    box-sizing: border-box;
+    flex-grow: 1; /* Allow content to grow and push footer down */
+    display: flex;
+    flex-direction: column;
+}
+
+.page-header {
+    display: flex;
+    align-items: center;
+    padding-bottom: 20px;
+    margin-bottom: 25px;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.header-logo {
+    width: 48px; /* Slightly larger logo */
+    height: 48px;
+    margin-right: 15px;
+}
+
+.page-header h1 {
+    font-size: 2em; /* Larger title for a full page */
+    font-weight: 700;
+    color: #343a40;
+    margin: 0;
+}
+
+main {
+    background-color: #ffffff; /* White background for the main content area */
+    padding: 25px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); /* Softer, more pronounced shadow */
+    flex-grow: 1;
+}
+
+.table-container {
+    width: 100%;
+    overflow-x: auto; /* Allow horizontal scrolling if table is too wide */
+}
+
+.domains-table {
+    width: 100%;
+    border-collapse: separate; /* Use separate for border-spacing */
+    border-spacing: 0; /* Remove default spacing */
+    border: 1px solid #dee2e6; /* Outer border for the table */
+    border-radius: 8px; /* Rounded corners for the table */
+    overflow: hidden; /* Clip content to rounded corners */
+}
+
+.domains-table th,
+.domains-table td {
+    padding: 12px 15px; /* Generous padding */
+    text-align: left;
+    border-bottom: 1px solid #e9ecef; /* Horizontal lines */
+    font-size: 0.95em;
+    vertical-align: top; /* Align content to the top for multi-line reasons */
+}
+
+.domains-table th {
+    background-color: #f1f3f5; /* Lighter header background */
+    font-weight: 600;
+    color: #495057;
+    font-size: 1em;
+    white-space: nowrap; /* Prevent header text from wrapping */
+}
+
+.domains-table td {
+    color: #343a40;
+}
+
+/* Column-specific styling */
+.domains-table .col-url {
+    width: 40%; /* Generous width for URL */
+    word-break: break-all; /* Break long URLs */
+}
+.domains-table .col-url a {
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 500;
+}
+.domains-table .col-url a:hover {
+    text-decoration: underline;
+    color: #0056b3;
+}
+
+.domains-table .col-reliability {
+    width: 15%;
+    text-align: center;
+    font-weight: 600;
+    font-size: 1.1em; /* Make reliability score stand out */
+}
+/* Color coding for reliability scores */
+.domains-table .reliability-score-low { color: #dc3545; } /* Red */
+.domains-table .reliability-score-medium { color: #ffc107; } /* Yellow */
+.domains-table .reliability-score-high { color: #28a745; } /* Green */
+
+
+.domains-table .col-reason {
+    width: 45%;
+    font-size: 0.9em;
+    color: #495057;
+    line-height: 1.5; /* Better readability for multi-line reasons */
+}
+
+.domains-table tbody tr:last-child td {
+    border-bottom: none; /* No border for the last row */
+}
+
+.domains-table tbody tr:hover {
+    background-color: #f8f9fa; /* Slightly darker hover for better contrast */
+}
+
+.table-message {
+    padding: 25px;
+    text-align: center;
+    font-style: italic;
+    color: #6c757d;
+    font-size: 1.1em;
+}
+.table-message.table-loading {
+    color: #007bff;
+    font-weight: 500;
+    background-color: #e9ecef;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    animation: loading 1.5s infinite; /* Add a loading animation */
+
+} /* Specific styles if needed */
+.table-message.table-empty {
+    color: #6c757d;
+    font-weight: 500;
+    background-color: #e9ecef;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+}
+.table-message.table-error {
+    color: #721c24;
+    font-weight: 500;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-radius: 6px;
+}
+
+.page-footer {
+    text-align: center;
+    padding: 20px 0;
+    margin-top: 30px;
+    font-size: 0.85em;
+    color: #6c757d;
+    border-top: 1px solid #e9ecef;
+}

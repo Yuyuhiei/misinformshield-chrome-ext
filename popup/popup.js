@@ -7,17 +7,11 @@ const startScanButton = document.getElementById('startScanButton');
 
 // Main Views & Navigation
 const mainAnalysisView = document.getElementById('mainAnalysisView');
-const unreliableDomainsView = document.getElementById('unreliableDomainsView');
-const popupTitle = document.getElementById('popupTitle'); // H1 title element
-const toggleDomainsViewButton = document.getElementById('toggleDomainsViewButton');
-const backToAnalysisButton = document.getElementById('backToAnalysisButton');
-
-// Domains View Elements
-const domainsTableContainer = document.getElementById('domainsTableContainer');
+const popupTitle = document.getElementById('popupTitle'); 
+const openDomainsPageButton = document.getElementById('openDomainsPageButton'); 
 
 // Existing DOM Elements
 const resultsDiv = document.getElementById('results');
-// const analysisRawTextPre = document.getElementById('analysisRawText'); // Kept commented if not used
 const loadingIndicator = document.getElementById('loadingIndicator');
 const errorP = document.getElementById('error');
 const scoreTextDisplayDiv = document.getElementById('scoreTextDisplay');
@@ -44,9 +38,8 @@ const SENSITIVITY_LEVELS = {
 
 // --- Initialize UI and Event Listeners ---
 document.addEventListener('DOMContentLoaded', () => {
-    // Initialize API Key status and visibility
     chrome.storage.local.get(['geminiApiKey'], (result) => {
-        if (apiKeyStatus && startScanButton) { // Ensure elements exist
+        if (apiKeyStatus && startScanButton) {
             if (result.geminiApiKey) {
                 apiKeyStatus.textContent = 'API Key is set.';
                 apiKeyStatus.className = 'status success';
@@ -59,82 +52,66 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Restore popup state or clear if reloaded
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (chrome.runtime.lastError || !tabs || tabs.length === 0) {
-            console.error("Error querying tabs or no active tab found.");
-            showMainAnalysisView(); // Default to main view on error
+            console.error("Popup.js: Error querying tabs or no active tab found.", chrome.runtime.lastError);
             return;
         }
         const tabId = tabs[0].id;
+        const currentTabUrl = tabs[0].url;
         let isReload = false;
         try {
             const navEntries = performance.getEntriesByType("navigation");
             isReload = navEntries && navEntries.length > 0 && navEntries[0].type === "reload";
         } catch (e) {
-            console.warn("performance.getEntriesByType not available or failed:", e);
+            console.warn("Popup.js: performance.getEntriesByType not available or failed:", e);
         }
 
         if (isReload) {
-            console.log("Page reloaded, clearing results and state from popup.js");
-            clearResults();
+            console.log("Popup.js: Page reloaded, clearing results and state.");
+            clearResults(true, currentTabUrl); // Pass true to indicate it's a full clear for a web page
             chrome.storage.local.remove(`popupState_${tabId}`);
-            showMainAnalysisView(); // Default to main view
         } else {
-            restorePopupState(tabId); // This will also handle setting the correct view
+            restorePopupState(tabId);
         }
     });
 
-    // Set initial slider label and track color (if slider exists on current view)
-    if (scanSensitivitySlider) {
-        updateSliderAppearance(scanSensitivitySlider.value);
-    }
+    if (scanSensitivitySlider) updateSliderAppearance(scanSensitivitySlider.value);
 
-    // Event listeners
     if(toggleApiKeyButton) toggleApiKeyButton.addEventListener('click', toggleApiKeyInputArea);
     if(toggleInfoButton) toggleInfoButton.addEventListener('click', toggleInfoArea);
     if(saveApiKeyButton) saveApiKeyButton.addEventListener('click', saveApiKey);
+    if(scanSensitivitySlider) scanSensitivitySlider.addEventListener('input', (event) => updateSliderAppearance(event.target.value));
+    if(startScanButton) startScanButton.addEventListener('click', handleStartScan);
     
-    if(scanSensitivitySlider) {
-        scanSensitivitySlider.addEventListener('input', (event) => {
-            updateSliderAppearance(event.target.value);
+    if(openDomainsPageButton) {
+        openDomainsPageButton.addEventListener('click', () => {
+            const domainsPageUrl = chrome.runtime.getURL("/domains/domains_table.html");
+            chrome.tabs.create({ url: domainsPageUrl });
         });
     }
-    
-    if(startScanButton) {
-        startScanButton.addEventListener('click', () => {
-            if (!scanSensitivitySlider) return;
-            const sensitivityValue = scanSensitivitySlider.value;
-            const selectedSensitivity = SENSITIVITY_LEVELS[sensitivityValue]?.value || "light";
-            console.log(`Start Scan button clicked. Sensitivity: ${selectedSensitivity}`);
-            clearResults();
-            showLoading(true);
-            sendHighlightRequestToContentScript(null);
-            analyzeTextQuery(selectedSensitivity);
-        });
-    }
-
-    if(toggleDomainsViewButton) toggleDomainsViewButton.addEventListener('click', showUnreliableDomainsView);
-    if(backToAnalysisButton) backToAnalysisButton.addEventListener('click', showMainAnalysisView);
 });
 
-// --- View Switching Functions ---
-function showMainAnalysisView() {
-    if(mainAnalysisView) mainAnalysisView.style.display = 'flex';
-    if(unreliableDomainsView) unreliableDomainsView.style.display = 'none';
-    if(popupTitle) popupTitle.textContent = 'MisinformShield';
+function handleStartScan() {
+    if (!scanSensitivitySlider) return;
+    const sensitivityValue = scanSensitivitySlider.value;
+    const selectedSensitivity = SENSITIVITY_LEVELS[sensitivityValue]?.value || "light";
+    console.log(`Popup.js: Start Scan button clicked. Sensitivity: ${selectedSensitivity}`);
+    
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (chrome.runtime.lastError || !tabs || !tabs[0]) {
+            showError("Could not get active tab information for scan.");
+            return;
+        }
+        const currentTabUrl = tabs[0].url;
+        clearResults(true, currentTabUrl); // Clear previous results and highlights on the current page
+        showLoading(true);
+        analyzeTextQuery(selectedSensitivity);
+    });
 }
 
-function showUnreliableDomainsView() {
-    if(mainAnalysisView) mainAnalysisView.style.display = 'none';
-    if(unreliableDomainsView) unreliableDomainsView.style.display = 'flex';
-    if(popupTitle) popupTitle.textContent = 'Listed Domains';
-    fetchAndDisplayUnreliableDomains();
-}
-
-
-// --- API Key Handling Functions ---
-function toggleApiKeyInputArea() {
+// --- API Key Handling Functions --- 
+function toggleApiKeyInputArea() { 
     if(!apiKeyInputArea || !apiKeySeparator || !apiKeyStatus) return;
     const isHidden = apiKeyInputArea.style.display === 'none';
     apiKeyInputArea.style.display = isHidden ? 'block' : 'none';
@@ -162,15 +139,13 @@ function toggleApiKeyInputArea() {
         });
     }
 }
-
-function toggleInfoArea() {
+function toggleInfoArea() { 
     if (!infoArea || !infoSeparator) return;
     const isHidden = infoArea.style.display === 'none';
     infoArea.style.display = isHidden ? 'block' : 'none';
     infoSeparator.style.display = isHidden ? 'block' : 'none';
 }
-
-function saveApiKey() {
+function saveApiKey() { 
     if(!apiKeyInput || !apiKeyStatus || !startScanButton) return;
     const apiKey = apiKeyInput.value.trim();
     if (apiKey) {
@@ -191,8 +166,8 @@ function saveApiKey() {
     }
 }
 
-// --- Slider UI Update Function ---
-function updateSliderAppearance(value) {
+// --- Slider UI Update Function --- 
+function updateSliderAppearance(value) { 
     if(!scanSensitivityLabel || !scanSensitivitySlider) return;
     const level = SENSITIVITY_LEVELS[value];
     if (level) {
@@ -203,87 +178,7 @@ function updateSliderAppearance(value) {
     }
 }
 
-// --- Unreliable Domains Logic ---
-function fetchAndDisplayUnreliableDomains() {
-    if(!domainsTableContainer) return;
-    domainsTableContainer.innerHTML = '<p class="table-message table-loading">Loading domains...</p>';
-
-    chrome.runtime.sendMessage({ action: "getUnreliableDomains" }, (response) => {
-        if (chrome.runtime.lastError) {
-            console.error("Error fetching unreliable domains:", chrome.runtime.lastError.message);
-            domainsTableContainer.innerHTML = `<p class="table-message table-error">Error: ${chrome.runtime.lastError.message}</p>`;
-            return;
-        }
-        if (response && response.success) {
-            renderDomainsTable(response.data);
-        } else {
-            console.error("Failed to fetch unreliable domains:", response ? response.error : "No response");
-            domainsTableContainer.innerHTML = `<p class="table-message table-error">Failed to load domains: ${response ? response.error : 'Unknown error'}</p>`;
-        }
-    });
-}
-
-function renderDomainsTable(domains) {
-    if(!domainsTableContainer) return;
-    if (!domains || domains.length === 0) {
-        domainsTableContainer.innerHTML = '<p class="table-message table-empty">No domains listed yet.</p>';
-        return;
-    }
-
-    const table = document.createElement('table');
-    table.className = 'domains-table';
-    
-    const thead = document.createElement('thead');
-    thead.innerHTML = `
-        <tr>
-            <th class="col-id">ID</th>
-            <th class="col-url">Domain URL</th>
-            <th class="col-reliability">Reliability</th>
-            <th class="col-reason">Reason</th>
-        </tr>
-    `;
-    table.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-    domains.forEach(domain => {
-        const row = tbody.insertRow();
-        
-        const cellId = row.insertCell();
-        cellId.textContent = domain.domain_id ? domain.domain_id.substring(0, 8) + '...' : 'N/A'; // Display first 8 chars of UUID
-        cellId.className = 'cell-id';
-        cellId.title = domain.domain_id || ''; // Show full ID on hover
-
-        const cellDomain = row.insertCell();
-        const domainLink = document.createElement('a');
-        const urlString = String(domain.domain_url);
-        domainLink.href = urlString.startsWith('http') ? urlString : `http://${urlString}`;
-        domainLink.textContent = domain.domain_url;
-        domainLink.target = "_blank"; 
-        domainLink.rel = "noopener noreferrer";
-        cellDomain.appendChild(domainLink);
-        cellDomain.className = 'cell-url';
-
-        const cellReliability = row.insertCell();
-        cellReliability.textContent = domain.reliability;
-        cellReliability.className = 'cell-reliability reliability-cell'; // Keep existing class for centering
-
-        const cellReason = row.insertCell();
-        cellReason.textContent = domain.reason || 'N/A'; // Display reason or N/A
-        cellReason.className = 'cell-reason';
-        if (domain.reason && domain.reason.length > 50) { // Add title for long reasons
-            cellReason.title = domain.reason;
-            cellReason.textContent = domain.reason.substring(0, 47) + '...';
-        }
-
-    });
-    table.appendChild(tbody);
-
-    domainsTableContainer.innerHTML = ''; 
-    domainsTableContainer.appendChild(table);
-}
-
-
-// --- Analysis Logic ---
+// --- Analysis Logic --- 
 function analyzeTextQuery(sens) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (chrome.runtime.lastError || !tabs || tabs.length === 0 || !tabs[0].id) {
@@ -291,27 +186,45 @@ function analyzeTextQuery(sens) {
             showLoading(false); return;
         }
         const activeTabId = tabs[0].id;
-        console.log(`Analyzing active tab: ${activeTabId}, Sensitivity: ${sens}`);
+        const activeTabUrl = tabs[0].url; // Get URL to check if it's an extension page
 
-        chrome.tabs.sendMessage(
-            activeTabId, { action: "getText" }, (response) => {
+        console.log(`Popup.js: Analyzing active tab: ${activeTabId}, URL: ${activeTabUrl}, Sensitivity: ${sens}`);
+
+        // Only attempt to get text if it's not an extension page (like domains_table.html)
+        if (activeTabUrl && !activeTabUrl.startsWith('chrome-extension://')) {
+            chrome.tabs.sendMessage( activeTabId, { action: "getText" }, (textResponse) => {
+                console.log("Popup.js: Received response for 'getText'.", "Last Error:", chrome.runtime.lastError, "Response:", textResponse);
                 if (chrome.runtime.lastError) {
-                    console.error("Error sending 'getText' to content script:", chrome.runtime.lastError.message);
+                    console.error("Popup.js: Error sending 'getText' to content script:", chrome.runtime.lastError.message);
                     showError(`Communication error with page: ${chrome.runtime.lastError.message}. Try reloading the page.`);
                     showLoading(false); return;
                 }
-                if (response && response.success && response.text) {
+                if (!textResponse) {
+                    console.error("Popup.js: No response from content script for 'getText'.");
+                    showError("Failed to get text from page: No response from content script.");
+                    showLoading(false); return;
+                }
+
+                if (textResponse.success && textResponse.text) {
+                    console.log("Popup.js: Sending 'analyzeText' message to background.");
                     chrome.runtime.sendMessage(
-                        { action: "analyzeText", text: response.text, sens: sens },
+                        { action: "analyzeText", text: textResponse.text, sens: sens },
                         (analysisResponse) => {
+                            console.log("Popup.js: Received response for 'analyzeText'.", "Last Error:", chrome.runtime.lastError, "Response:", analysisResponse);
                             showLoading(false);
                             if (chrome.runtime.lastError) {
-                                console.error("Error receiving analysis from background:", chrome.runtime.lastError.message);
+                                console.error("Popup.js: Error receiving analysis from background:", chrome.runtime.lastError.message);
                                 showError(`Analysis failed: ${chrome.runtime.lastError.message}`);
                                 return;
                             }
-                            if (analysisResponse && analysisResponse.success) {
-                                displayAnalysisResults(analysisResponse, activeTabId, sens);
+                            if (!analysisResponse) { 
+                                console.error("Popup.js: No response received from background for 'analyzeText'. Port might have closed.");
+                                showError("Analysis failed: No response from background script.");
+                                return;
+                            }
+
+                            if (analysisResponse.success) {
+                                displayAnalysisResults(analysisResponse, activeTabId, sens, activeTabUrl); // Pass URL
                                 savePopupState(activeTabId);
                             } else {
                                 showError(analysisResponse.error || "Analysis failed. Check background logs.");
@@ -319,15 +232,19 @@ function analyzeTextQuery(sens) {
                         }
                     );
                 } else {
-                    showError(response.error || "Failed to get text from page. The page might be too complex or empty.");
+                    showError(textResponse.error || "Failed to get text from page. The page might be too complex or empty.");
                     showLoading(false);
                 }
-            }
-        );
+            });
+        } else {
+            console.log("Popup.js: Skipping text analysis for extension page or invalid URL:", activeTabUrl);
+            showError("Cannot analyze this type of page."); // Or handle more gracefully
+            showLoading(false);
+        }
     });
 }
 
-function displayAnalysisResults(analysisResponse, activeTabId, sens) {
+function displayAnalysisResults(analysisResponse, activeTabId, sens, tabUrl) { 
     if (typeof analysisResponse.score !== 'undefined') {
         displayScoreBar(analysisResponse.score, analysisResponse.domainInfo);
     } else {
@@ -338,14 +255,16 @@ function displayAnalysisResults(analysisResponse, activeTabId, sens) {
         }
     }
     displayDomainWarning(analysisResponse.domainInfo);
-    if (analysisResponse.flags && analysisResponse.flags.length > 0) {
-        sendHighlightRequestToContentScript(analysisResponse.flags, activeTabId, sens);
-    } else {
-        console.log("No flags to highlight.");
+    // Only send highlight request if it's not an extension page
+    if (tabUrl && !tabUrl.startsWith('chrome-extension://')) {
+        if (analysisResponse.flags && analysisResponse.flags.length > 0) {
+            sendHighlightRequestToContentScript(analysisResponse.flags, activeTabId, sens);
+        } else {
+            console.log("Popup.js: No flags to highlight.");
+        }
     }
 }
-
-function displayDomainWarning(domainInfo) {
+function displayDomainWarning(domainInfo) { 
     if(!domainWarningDiv) return;
     if (domainInfo && typeof domainInfo.reliability === 'number') {
         const reliability = domainInfo.reliability;
@@ -368,10 +287,9 @@ function displayDomainWarning(domainInfo) {
     }
 }
 
-// --- Popup State Management ---
-function savePopupState(tabId) {
+// --- Popup State Management --- 
+function savePopupState(tabId) { 
     const state = {
-        currentView: mainAnalysisView && mainAnalysisView.style.display !== 'none' ? 'main' : 'domains',
         domainWarningText: domainWarningDiv ? domainWarningDiv.textContent : null,
         domainWarningDisplay: domainWarningDiv ? domainWarningDiv.style.display : null,
         domainWarningClassName: domainWarningDiv ? domainWarningDiv.className : null,
@@ -383,34 +301,25 @@ function savePopupState(tabId) {
         sliderValue: scanSensitivitySlider ? scanSensitivitySlider.value : "1"
     };
     chrome.storage.local.set({ [`popupState_${tabId}`]: state }, () => {
-        if (chrome.runtime.lastError) console.error("Error saving popup state:", chrome.runtime.lastError.message);
-        else console.log("Popup state saved for tab:", tabId, state);
+        if (chrome.runtime.lastError) console.error("Popup.js: Error saving popup state:", chrome.runtime.lastError.message);
+        else console.log("Popup.js: Popup state saved for tab:", tabId, state);
     });
 }
-
-function restorePopupState(tabId) {
+function restorePopupState(tabId) { 
     const key = `popupState_${tabId}`;
     chrome.storage.local.get([key], (data) => {
         if (chrome.runtime.lastError) {
-            console.error("Error restoring popup state:", chrome.runtime.lastError.message);
-            showMainAnalysisView(); 
+            console.error("Popup.js: Error restoring popup state:", chrome.runtime.lastError.message);
             return;
         }
         const state = data[key];
         if (!state) {
-            clearResults();
+            clearResults(false); // Don't try to clear highlights if just opening popup
             if(scanSensitivitySlider) updateSliderAppearance(scanSensitivitySlider.value || "1");
-            showMainAnalysisView(); 
             return;
         }
 
-        console.log("Restoring popup state for tab:", tabId, state);
-
-        if (state.currentView === 'domains') {
-            showUnreliableDomainsView();
-        } else {
-            showMainAnalysisView();
-        }
+        console.log("Popup.js: Restoring popup state for tab:", tabId, state);
 
         if (domainWarningDiv) {
             domainWarningDiv.textContent = state.domainWarningText || '';
@@ -439,20 +348,41 @@ function restorePopupState(tabId) {
     });
 }
 
-// --- Helper Functions ---
-function sendHighlightRequestToContentScript(flags, tabId, sens) {
+// --- Helper Functions --- 
+function sendHighlightRequestToContentScript(flags, tabId, sens) { 
+    // No change needed here, the caller should ensure tabId is for a page with content script
     const action = { action: "highlightText", flags: flags, sens: sens };
-    const callback = response => { if (chrome.runtime.lastError) console.warn("Could not send highlight request:", chrome.runtime.lastError.message); };
+    const callback = response => { 
+        if (chrome.runtime.lastError) {
+            // Log the error but don't show it to the user in the popup,
+            // as this might be called when not expected (e.g., on an extension page)
+            console.warn("Popup.js (sendHighlightRequestToContentScript):", chrome.runtime.lastError.message);
+        }
+    };
     if (!tabId) {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs && tabs.length > 0 && tabs[0].id) chrome.tabs.sendMessage(tabs[0].id, action, callback);
+            if (tabs && tabs.length > 0 && tabs[0].id && tabs[0].url && !tabs[0].url.startsWith('chrome-extension://')) {
+                 chrome.tabs.sendMessage(tabs[0].id, action, callback);
+            } else if (tabs && tabs.length > 0 && tabs[0].url && tabs[0].url.startsWith('chrome-extension://')) {
+                console.log("Popup.js: Not sending highlight request to an extension page:", tabs[0].url);
+            }
         });
     } else {
-        chrome.tabs.sendMessage(tabId, action, callback);
+        // Before sending, quickly check the URL of the tabId if possible
+        chrome.tabs.get(tabId, (tab) => {
+            if (chrome.runtime.lastError) {
+                console.warn("Popup.js: Could not get tab info for highlight request:", chrome.runtime.lastError.message);
+                return;
+            }
+            if (tab && tab.url && !tab.url.startsWith('chrome-extension://')) {
+                chrome.tabs.sendMessage(tabId, action, callback);
+            } else {
+                console.log("Popup.js: Not sending highlight request to an extension page or invalid tab:", tab ? tab.url : "unknown URL");
+            }
+        });
     }
 }
-
-function displayScoreBar(score, domainInfo) {
+function displayScoreBar(score, domainInfo) { 
     if(!resultsDiv || !errorP || !scoreTextDisplayDiv || !progressBarDiv) return;
     const numericScore = Math.max(0, Math.min(100, Number(score)));
     resultsDiv.style.display = 'flex';
@@ -467,29 +397,39 @@ function displayScoreBar(score, domainInfo) {
 
     if (domainInfo && !domainInfo.isUnreliable && numericScore <= 50 && domainInfo.name) {
         chrome.runtime.sendMessage({ action: "logNewUnreliableDomain", score: numericScore, domain: domainInfo.name }, 
-            response => { if (chrome.runtime.lastError) console.warn("Error logging unreliable domain:", chrome.runtime.lastError.message); }
+            response => { if (chrome.runtime.lastError) console.warn("Popup.js: Error logging unreliable domain:", chrome.runtime.lastError.message); }
         );
     }
 }
-
-function showLoading(isLoading) {
+function showLoading(isLoading) { 
     if(loadingIndicator) loadingIndicator.style.display = isLoading ? 'flex' : 'none';
     if (startScanButton) startScanButton.disabled = isLoading;
     if (scanSensitivitySlider) scanSensitivitySlider.disabled = isLoading;
 }
-
-function showError(message) {
+function showError(message) { 
     if (resultsDiv) resultsDiv.style.display = 'none';
     if (errorP) errorP.textContent = `Error: ${message}`;
-    console.error("Error displayed to user:", message);
+    console.error("Popup.js: Error displayed to user:", message);
     showLoading(false);
 }
 
-function clearResults() {
+function clearResults(attemptHighlightClear = false, tabUrlForHighlightClear = null) { 
     if (scoreTextDisplayDiv) scoreTextDisplayDiv.textContent = '-- / 100';
     if (progressBarDiv) { progressBarDiv.style.width = '0%'; progressBarDiv.className = 'progress-bar'; }
     if (errorP) errorP.textContent = '';
     if (resultsDiv) resultsDiv.style.display = 'none';
     if (domainWarningDiv) { domainWarningDiv.style.display = 'none'; domainWarningDiv.className = 'warning-message';}
-    sendHighlightRequestToContentScript(null);
+    
+    if (attemptHighlightClear && tabUrlForHighlightClear && !tabUrlForHighlightClear.startsWith('chrome-extension://')) {
+        // Get current tab ID to send message specifically
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs.length > 0 && tabs[0].id) {
+                 sendHighlightRequestToContentScript(null, tabs[0].id, null); // Send to specific tab
+            } else {
+                console.warn("Popup.js (clearResults): Could not get active tab ID to clear highlights.");
+            }
+        });
+    } else if (attemptHighlightClear) {
+        console.log("Popup.js (clearResults): Not attempting highlight clear for extension page or no URL.");
+    }
 }
