@@ -1,423 +1,466 @@
 // popup/popup.js
 
-const analyzeButtonL = document.getElementById('analyzeButtonL');
-const analyzeButtonM = document.getElementById('analyzeButtonM');
-const analyzeButtonD = document.getElementById('analyzeButtonD');
+// DOM Elements for new UI (Slider and single scan button)
+const scanSensitivitySlider = document.getElementById('scanSensitivity');
+const scanSensitivityLabel = document.getElementById('scanSensitivityLabel');
+const startScanButton = document.getElementById('startScanButton');
+
+// Existing DOM Elements from your provided JS
 const resultsDiv = document.getElementById('results');
-const analysisRawTextPre = document.getElementById('analysisRawText');
+const analysisRawTextPre = document.getElementById('analysisRawText'); // Keep if used
 const loadingIndicator = document.getElementById('loadingIndicator');
-const errorP = document.getElementById('error');
+const errorP = document.getElementById('error'); // Ensure this ID matches HTML (changed to error-message class)
 const scoreTextDisplayDiv = document.getElementById('scoreTextDisplay');
 const progressBarDiv = document.getElementById('progressBar');
-const domainWarningDiv = document.getElementById('domainWarning'); // Added for domain warning
+const domainWarningDiv = document.getElementById('domainWarning');
 
-// API Key Elements
+// API Key & Info Elements from your provided JS
 const apiKeyInput = document.getElementById('apiKey');
 const saveApiKeyButton = document.getElementById('saveApiKey');
 const apiKeyStatus = document.getElementById('apiKeyStatus');
-const toggleApiKeyButton = document.getElementById('toggleApiKeyButton'); // New button
-const toggleInfoButton = document.getElementById('toggleInfoButton'); // New button
-const apiKeyInputArea = document.getElementById('apiKeyInputArea'); // The div containing the input/button
-const infoArea = document.getElementById('infoArea'); // The div containing the input/button
-const infoSeparator = document.getElementById('infoSeparator'); // The div containing the input/button
-const apiKeySeparator = document.getElementById('apiKeySeparator'); // The <hr> separator
+const toggleApiKeyButton = document.getElementById('toggleApiKeyButton');
+const toggleInfoButton = document.getElementById('toggleInfoButton');
+const apiKeyInputArea = document.getElementById('apiKeyInputArea');
+const infoArea = document.getElementById('infoArea');
+const infoSeparator = document.getElementById('infoSeparator');
+const apiKeySeparator = document.getElementById('apiKeySeparator');
 
-// --- API Key Handling ---
+// Sensitivity levels mapping for the slider
+const SENSITIVITY_LEVELS = {
+    1: { name: "Light Scan", value: "light", gradient: "linear-gradient(to right, #6EE7B7, #34D399)", trackClass: "light-scan-track" },
+    2: { name: "Medium Scan", value: "medium", gradient: "linear-gradient(to right, #FCD34D, #FBBF24)", trackClass: "medium-scan-track" },
+    3: { name: "Deep Scan", value: "deep", gradient: "linear-gradient(to right, #F87171, #EF4444)", trackClass: "deep-scan-track" }
+};
+
+// --- Initialize UI and Event Listeners ---
 document.addEventListener('DOMContentLoaded', () => {
-    // Check if API key exists and update status, but don't show input
+    // Initialize API Key status and visibility
     chrome.storage.local.get(['geminiApiKey'], (result) => {
         if (result.geminiApiKey) {
             apiKeyStatus.textContent = 'API Key is set.';
-            apiKeyStatus.style.color = 'green';
-            analyzeButtonL.disabled = false; // Enable analyze button if key exists
-            analyzeButtonM.disabled = false; // Enable analyze button if key exists
-            analyzeButtonD.disabled = false; // Enable analyze button if key exists
+            apiKeyStatus.className = 'status success'; // Use new class
+            if (startScanButton) startScanButton.disabled = false;
         } else {
             apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
-            apiKeyStatus.style.color = '#e74c3c'; // Use error color
-            analyzeButtonL.disabled = true; // Disable analyze button if no key
-            analyzeButtonM.disabled = true; // Disable analyze button if no key
-            analyzeButtonD.disabled = true; // Disable analyze button if no key
+            apiKeyStatus.className = 'status error'; // Use new class
+            if (startScanButton) startScanButton.disabled = true;
+        }
+    });
+
+    // Restore popup state or clear if reloaded
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (chrome.runtime.lastError || !tabs || tabs.length === 0) {
+            console.error("Error querying tabs or no active tab found.");
+            return;
+        }
+        const tabId = tabs[0].id;
+        // Performance.getEntriesByType is not always available in extensions, especially on first open.
+        // A simpler check might be needed if this causes issues, or rely on onUpdated listener in background.
+        let isReload = false;
+        try {
+            const navEntries = performance.getEntriesByType("navigation");
+            isReload = navEntries && navEntries.length > 0 && navEntries[0].type === "reload";
+        } catch (e) {
+            console.warn("performance.getEntriesByType not available or failed:", e);
+            // Fallback: if popup is opened, assume it's not a reload for state restoration purposes,
+            // background script handles clearing state on actual tab reloads.
         }
 
-         // Now do reload detection and restore/clear per-tab state
-         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            const tabId = tabs[0].id;
-            const navEntries = performance.getEntriesByType("navigation");
-            const isReload = navEntries.length && navEntries[0].type === "reload";
 
-            if (isReload) {
-                console.log("reloaded");
-                clearResults();
-            } else {
-                restorePopupState(tabId);
-            }
-        });
+        if (isReload) {
+            console.log("Page reloaded, clearing results from popup.js");
+            clearResults(); // Clear results on page reload
+            chrome.storage.local.remove(`popupState_${tabId}`); // Also clear stored state for this tab
+        } else {
+            restorePopupState(tabId); // Restore state if not a reload
+        }
     });
 
-    
+    // Set initial slider label and track color
+    if (scanSensitivitySlider) { // Check if element exists
+        updateSliderAppearance(scanSensitivitySlider.value);
+    }
+
+
+    // Event listener for API key toggle button
+    if (toggleApiKeyButton) toggleApiKeyButton.addEventListener('click', toggleApiKeyInputArea);
+
+    // Event listener for Info toggle button
+    if (toggleInfoButton) toggleInfoButton.addEventListener('click', toggleInfoArea);
+
+    // Event listener for saving API key
+    if (saveApiKeyButton) saveApiKeyButton.addEventListener('click', saveApiKey);
+
+    // Event listener for slider input
+    if (scanSensitivitySlider) {
+        scanSensitivitySlider.addEventListener('input', (event) => {
+            updateSliderAppearance(event.target.value);
+        });
+    }
+
+    // Event listener for the "Start Scan" button
+    if (startScanButton) {
+        startScanButton.addEventListener('click', () => {
+            const sensitivityValue = scanSensitivitySlider.value;
+            const selectedSensitivity = SENSITIVITY_LEVELS[sensitivityValue]?.value || "light";
+
+            console.log(`Start Scan button clicked. Sensitivity: ${selectedSensitivity}`);
+            clearResults();
+            showLoading(true);
+            sendHighlightRequestToContentScript(null); // Clear previous highlights
+            analyzeTextQuery(selectedSensitivity);
+        });
+    }
 });
 
-// this is a function to save the popup state after analysis
-function savePopupState() {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const tabId = tabs[0].id;
-    
-        const state = {
-            domainWarning: {
-                text: domainWarningDiv.textContent,
-                style: {
-                    marginTop: domainWarningDiv.style.marginTop,
-                    padding: domainWarningDiv.style.padding,
-                    border: domainWarningDiv.style.border,
-                    borderRadius: domainWarningDiv.style.borderRadius,
-                    display: domainWarningDiv.style.display,
-                    color: domainWarningDiv.style.color,
-                    backgroundColor: domainWarningDiv.style.backgroundColor,
-                    borderColor: domainWarningDiv.style.borderColor
-                }
-            },
-            scoreTextDisplay: {
-                text: scoreTextDisplayDiv.textContent,
-                width: progressBarDiv.style.width,
-                className: progressBarDiv.className
-            },
-            results: resultsDiv.style.display,
-            errorText: errorP.textContent
-        };
-    
-        chrome.storage.local.set({ [`popupState_${tabId}`]: state });
-    });
-}
 
-function restorePopupState() {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const tabId = tabs[0].id;
-        const key = `popupState_${tabId}`;
+// --- API Key Handling Functions ---
+function toggleApiKeyInputArea() {
+    if (!apiKeyInputArea || !apiKeySeparator || !apiKeyStatus) return;
+    const isHidden = apiKeyInputArea.style.display === 'none';
+    apiKeyInputArea.style.display = isHidden ? 'block' : 'none';
+    apiKeySeparator.style.display = isHidden ? 'block' : 'none';
 
-        chrome.storage.local.get([key], (data) => {
-            const state = data[key];
-            if (!state) return;
-
-            if (state.domainWarning && domainWarningDiv) {
-                domainWarningDiv.textContent = state.domainWarning.text;
-                Object.assign(domainWarningDiv.style, state.domainWarning.style);
-            }
-
-            if (state.scoreTextDisplay && scoreTextDisplayDiv && progressBarDiv) {
-                scoreTextDisplayDiv.textContent = state.scoreTextDisplay.text;
-                progressBarDiv.style.width = state.scoreTextDisplay.width;
-                progressBarDiv.className = state.scoreTextDisplay.className;
-            }
-
-            if (state.results && resultsDiv) {
-                resultsDiv.style.display = state.results;
-            }
-
-            if (state.errorText && errorP) {
-                errorP.textContent = state.errorText;
+    if (isHidden) { // When showing the input area
+        chrome.storage.local.get(['geminiApiKey'], (result) => {
+            if (!result.geminiApiKey) {
+                apiKeyStatus.textContent = 'Enter your Gemini API Key below.';
+                apiKeyStatus.className = 'status neutral';
+            } else {
+                apiKeyStatus.textContent = 'API Key is set. You can update it below.';
+                apiKeyStatus.className = 'status success';
             }
         });
-    });
+    } else { // When hiding, revert status based on whether key is actually saved
+        chrome.storage.local.get(['geminiApiKey'], (result) => {
+            if (result.geminiApiKey) {
+                apiKeyStatus.textContent = 'API Key is set.';
+                apiKeyStatus.className = 'status success';
+            } else {
+                apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
+                apiKeyStatus.className = 'status error';
+            }
+        });
+    }
 }
 
-saveApiKeyButton.addEventListener('click', () => {
+function toggleInfoArea() {
+    if (!infoArea || !infoSeparator) return;
+    const isHidden = infoArea.style.display === 'none';
+    infoArea.style.display = isHidden ? 'block' : 'none';
+    infoSeparator.style.display = isHidden ? 'block' : 'none';
+}
+
+function saveApiKey() {
+    if (!apiKeyInput || !apiKeyStatus || !startScanButton) return;
     const apiKey = apiKeyInput.value.trim();
     if (apiKey) {
         chrome.storage.local.set({ geminiApiKey: apiKey }, () => {
             if (chrome.runtime.lastError) {
-                apiKeyStatus.textContent = `Error saving key: ${chrome.runtime.lastError.message}`;
-                apiKeyStatus.style.color = '#e74c3c';
+                apiKeyStatus.textContent = `Error: ${chrome.runtime.lastError.message}`;
+                apiKeyStatus.className = 'status error';
             } else {
                 apiKeyStatus.textContent = 'API Key saved successfully!';
-                apiKeyStatus.style.color = 'green';
-                apiKeyInput.value = ''; // Clear the input field
-                analyzeButtonL.disabled = false; // Enable analyze button
-                analyzeButtonM.disabled = false; // Enable analyze button
-                analyzeButtonD.disabled = false; // Enable analyze button
-                // Optionally hide the section after saving
-                // apiKeyInputArea.style.display = 'none';
-                // apiKeySeparator.style.display = 'none';
+                apiKeyStatus.className = 'status success';
+                apiKeyInput.value = '';
+                startScanButton.disabled = false;
             }
         });
     } else {
         apiKeyStatus.textContent = 'Please enter an API Key.';
-        apiKeyStatus.style.color = '#e74c3c';
+        apiKeyStatus.className = 'status error';
     }
-});
+}
 
-// Listener for the key icon button
-toggleApiKeyButton.addEventListener('click', () => {
-    const isHidden = apiKeyInputArea.style.display === 'none';
-    apiKeyInputArea.style.display = isHidden ? 'block' : 'none';
-    apiKeySeparator.style.display = isHidden ? 'block' : 'none';
-    // Update status message when showing the input area if no key is set
-    if (isHidden) {
-        chrome.storage.local.get(['geminiApiKey'], (result) => {
-            if (!result.geminiApiKey) {
-                apiKeyStatus.textContent = 'Enter your Gemini API Key below.';
-                apiKeyStatus.style.color = '#555'; // Neutral color
-            } else {
-                // If key exists, maybe show a different message or keep the 'Key is set' message
-                apiKeyStatus.textContent = 'API Key is set. You can update it below.';
-                apiKeyStatus.style.color = 'green';
-            }
-        });
-    } else {
-        // When hiding, revert status based on whether key is actually saved
-        chrome.storage.local.get(['geminiApiKey'], (result) => {
-            if (result.geminiApiKey) {
-                apiKeyStatus.textContent = 'API Key is set.';
-                apiKeyStatus.style.color = 'green';
-            } else {
-                apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
-                apiKeyStatus.style.color = '#e74c3c';
-            }
-        });
+// --- Slider UI Update Function ---
+function updateSliderAppearance(value) {
+    if (!scanSensitivityLabel || !scanSensitivitySlider) return;
+    const level = SENSITIVITY_LEVELS[value];
+    if (level) {
+        scanSensitivityLabel.textContent = level.name;
+        scanSensitivityLabel.style.backgroundImage = level.gradient;
+        
+        scanSensitivitySlider.classList.remove('light-scan-track', 'medium-scan-track', 'deep-scan-track');
+        scanSensitivitySlider.classList.add(level.trackClass);
     }
-});
-
-toggleInfoButton.addEventListener('click', () => {
-    const isHidden = infoArea.style.display === 'none';
-    infoArea.style.display = isHidden ? 'block' : 'none';
-    infoSeparator.style.display = isHidden ? 'block' : 'none';
-});
-// --- (End API Key Handling) ---
-
-// --- Used for checking logging new unreliable domain ---
-// analyzeButton.addEventListener('click', () => {
-//     console.log("Analyze button clicked.");
-//     const domain_info_test = {      // Add domain info to the response
-//         name: 'example.com',
-//         isUnreliable: false,
-//         reliability: null
-//     }
-//     displayScoreBar(30, domain_info_test); // Temporary for testing
-// });
-
-// --- Analysis Trigger ---
-analyzeButtonL.addEventListener('click', () => {
-    console.log("Analyze button clicked.");
-    clearResults();
-    showLoading(true);
-    // Clear previous highlights on the page
-    sendHighlightRequestToContentScript(null); // Send null to clear
-    analyzeTextQuery('light')
-}); // End analyzeButtonL listener
-
-analyzeButtonM.addEventListener('click', () => {
-    console.log("Analyze button clicked.");
-    clearResults();
-    showLoading(true);
-    // Clear previous highlights on the page
-    sendHighlightRequestToContentScript(null); // Send null to clear
-    analyzeTextQuery('medium')
-}); // End analyzeButtonM listener
-
-analyzeButtonD.addEventListener('click', () => {
-    console.log("Analyze button clicked.");
-    clearResults();
-    showLoading(true);
-    // Clear previous highlights on the page
-    sendHighlightRequestToContentScript(null); // Send null to clear
-    analyzeTextQuery('deep')
-}); // End analyzeButtonD listener
+}
 
 
-function analyzeTextQuery(sens) {
+// --- Analysis Logic ---
+function analyzeTextQuery(sens) { // 'sens' is the sensitivity from slider
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (!tabs || tabs.length === 0 || !tabs[0].id) {
-            showError("Could not find active tab.");
+        if (chrome.runtime.lastError || !tabs || tabs.length === 0 || !tabs[0].id) {
+            showError("Could not find active tab. Please ensure a page is loaded and try again.");
             showLoading(false); return;
         }
         const activeTabId = tabs[0].id;
-        console.log("Analyzing active tab:", activeTabId);
+        console.log(`Analyzing active tab: ${activeTabId}, Sensitivity: ${sens}`);
 
         chrome.tabs.sendMessage(
             activeTabId, { action: "getText" }, (response) => {
                 if (chrome.runtime.lastError) {
-                    console.error("Error sending message to content script:", chrome.runtime.lastError.message);
-                    showError(`Could not communicate with the page. Error: ${chrome.runtime.lastError.message}`);
+                    console.error("Error sending 'getText' to content script:", chrome.runtime.lastError.message);
+                    showError(`Communication error with page: ${chrome.runtime.lastError.message}. Try reloading the page.`);
                     showLoading(false); return;
                 }
                 if (response && response.success && response.text) {
-                    console.log(response.text)
-                    // Send text to background for analysis
                     chrome.runtime.sendMessage(
-                        { action: "analyzeText", text: response.text, sens: sens },
+                        { action: "analyzeText", text: response.text, sens: sens }, // Pass sensitivity
                         (analysisResponse) => {
-                            showLoading(false); // Hide loading indicator once response received
+                            showLoading(false);
                             if (chrome.runtime.lastError) {
-                                console.error("Error receiving message from background script:", chrome.runtime.lastError.message);
-                                showError(`Analysis failed. Error: ${chrome.runtime.lastError.message}`);
-                                return; // Stop further processing
+                                console.error("Error receiving analysis from background:", chrome.runtime.lastError.message);
+                                showError(`Analysis failed: ${chrome.runtime.lastError.message}`);
+                                return;
                             }
 
-                            // Process successful response
                             if (analysisResponse && analysisResponse.success) {
-                                // Display score bar (if score exists)
-                                if (typeof analysisResponse.score !== 'undefined') {
-                                    displayScoreBar(analysisResponse.score, analysisResponse.domainInfo);
-                                } else {
-                                    console.warn("Score missing from analysis response.");
-                                    // Optionally display a message or default bar
-                                    scoreTextDisplayDiv.textContent = 'Score N/A';
-                                    progressBarDiv.style.width = '0%';
-                                    progressBarDiv.className = 'progress-bar'; // Reset color
-                                }
-
-                                // *** Display Domain Warning ***
-                                if (analysisResponse.domainInfo && typeof analysisResponse.domainInfo.reliability === 'number') {
-                                    const reliability = analysisResponse.domainInfo.reliability;
-                                    const domain = analysisResponse.domainInfo.name;
-                                
-                                    if (domainWarningDiv) {
-                                        domainWarningDiv.style.marginTop = '10px';
-                                        domainWarningDiv.style.padding = '8px';
-                                        domainWarningDiv.style.border = '1px solid';
-                                        domainWarningDiv.style.borderRadius = '4px';
-                                
-                                        if (reliability <= 5) {
-                                            // Unreliable
-                                            domainWarningDiv.textContent = `⚠️ Warning: The domain "${domain}" is frequently associated with unreliable information (Reliability: ${reliability}/10).`;
-                                            domainWarningDiv.style.display = 'block';
-                                            domainWarningDiv.style.color = '#e74c3c'; // red
-                                            domainWarningDiv.style.borderColor = '#e74c3c';
-                                            domainWarningDiv.style.backgroundColor = '#fbeae5';
-                                        } else if (reliability >= 9) {
-                                            // Highly reliable
-                                            domainWarningDiv.textContent = `✅ Trusted Source: The domain "${domain}" has a high reliability rating (${reliability}/10).`;
-                                            domainWarningDiv.style.display = 'block';
-                                            domainWarningDiv.style.color = '#2e7d32'; // green
-                                            domainWarningDiv.style.borderColor = '#2e7d32';
-                                            domainWarningDiv.style.backgroundColor = '#e8f5e9';
-                                        } else {
-                                            // Medium reliability
-                                            domainWarningDiv.textContent = `ℹ️ Info: The domain "${domain}" has a moderate reliability score (${reliability}/10). Interpret with care.`;
-                                            domainWarningDiv.style.display = 'block';
-                                            domainWarningDiv.style.color = '#f39c12'; // amber
-                                            domainWarningDiv.style.borderColor = '#f39c12';
-                                            domainWarningDiv.style.backgroundColor = '#fff4e5';
-                                        }
-                                    }
-                                } else if (domainWarningDiv) {
-                                    domainWarningDiv.style.display = 'none'; // No info available
-                                }
-
-                                // Store raw analysis text (hidden) - Keep this if needed for debugging or future features
-                                // analysisRawTextPre.textContent = analysisResponse.analysis || "No detailed analysis available.";
-
-                                // *** Send flags to content script for highlighting ***
-                                if (analysisResponse.flags && analysisResponse.flags.length > 0) {
-                                    console.log("Sending flags to content script:", analysisResponse.flags);
-                                    sendHighlightRequestToContentScript(analysisResponse.flags, activeTabId, sens);
-                                } else {
-                                    console.log("No flags received from analysis.");
-                                    // Optionally display a message in the popup
-                                }
-                                // save state after analysis
-                                savePopupState();
+                                displayAnalysisResults(analysisResponse, activeTabId, sens); // Pass sens for highlighting
+                                savePopupState(activeTabId); // Save state after successful analysis
                             } else {
-                                // Handle analysis failure reported by background script
                                 showError(analysisResponse.error || "Analysis failed. Check background logs.");
                             }
-                        } // End analysisResponse callback
-                    ); // End chrome.runtime.sendMessage
+                        }
+                    );
                 } else {
-                    // Handle failure to get text from content script
-                    showError(response.error || "Failed to get text from page.");
+                    showError(response.error || "Failed to get text from page. The page might be too complex or empty.");
                     showLoading(false);
                 }
-            } // End response callback
-        ); // End chrome.tabs.sendMessage (getText)
-    }); // End chrome.tabs.query
-}
-
-// --- Function to send highlight request to content script ---
-function sendHighlightRequestToContentScript(flags, tabId, sens) {
-    if (!tabId) { // If called just to clear highlights
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs && tabs.length > 0 && tabs[0].id) {
-                chrome.tabs.sendMessage(tabs[0].id, { action: "highlightText", flags: flags, sens: sens });
             }
-        });
+        );
+    });
+}
+
+function displayAnalysisResults(analysisResponse, activeTabId, sens) {
+    // Display score bar
+    if (typeof analysisResponse.score !== 'undefined') {
+        displayScoreBar(analysisResponse.score, analysisResponse.domainInfo);
     } else {
-        chrome.tabs.sendMessage(tabId, { action: "highlightText", flags: flags, sens: sens});
+        if (scoreTextDisplayDiv) scoreTextDisplayDiv.textContent = 'Score N/A';
+        if (progressBarDiv) {
+            progressBarDiv.style.width = '0%';
+            progressBarDiv.className = 'progress-bar'; // Reset color
+        }
+    }
+
+    // Display Domain Warning (using your existing logic structure)
+    if (domainWarningDiv && analysisResponse.domainInfo && typeof analysisResponse.domainInfo.reliability === 'number') {
+        const reliability = analysisResponse.domainInfo.reliability;
+        const domain = analysisResponse.domainInfo.name || "Current domain";
+        
+        domainWarningDiv.style.display = 'block';
+        domainWarningDiv.style.marginTop = '10px'; // from new CSS
+        domainWarningDiv.style.padding = '10px';   // from new CSS
+        domainWarningDiv.style.borderWidth = '1px';// from new CSS
+        domainWarningDiv.style.borderStyle = 'solid';// from new CSS
+        domainWarningDiv.style.borderRadius = '6px';// from new CSS
+
+        if (reliability <= 5) { // Unreliable
+            domainWarningDiv.textContent = `⚠️ Warning: "${domain}" is often linked to unreliable info (Reliability: ${reliability}/10).`;
+            domainWarningDiv.style.color = '#856404'; // Dark yellow/brown text
+            domainWarningDiv.style.backgroundColor = '#fff3cd'; // Light yellow background
+            domainWarningDiv.style.borderColor = '#ffeeba'; // Yellowish border
+        } else if (reliability >= 9) { // Highly reliable
+            domainWarningDiv.textContent = `✅ Trusted Source: "${domain}" has a high reliability rating (${reliability}/10).`;
+            domainWarningDiv.style.color = '#155724'; // Dark green text
+            domainWarningDiv.style.backgroundColor = '#d4edda'; // Light green background
+            domainWarningDiv.style.borderColor = '#c3e6cb'; // Greenish border
+        } else { // Medium reliability
+            domainWarningDiv.textContent = `ℹ️ Info: "${domain}" has a moderate reliability score (${reliability}/10). Interpret with care.`;
+            domainWarningDiv.style.color = '#004085'; // Dark blue text
+            domainWarningDiv.style.backgroundColor = '#cce5ff'; // Light blue background
+            domainWarningDiv.style.borderColor = '#b8daff'; // Bluish border
+        }
+    } else if (domainWarningDiv) {
+        domainWarningDiv.style.display = 'none'; // Hide if no info
+    }
+
+
+    // Send flags to content script for highlighting
+    if (analysisResponse.flags && analysisResponse.flags.length > 0) {
+        sendHighlightRequestToContentScript(analysisResponse.flags, activeTabId, sens);
+    } else {
+        console.log("No flags to highlight.");
     }
 }
 
-// --- Progress Bar Display Function ---
-// *** RENAMED from displayChart and REIMPLEMENTED ***
-function displayScoreBar(score, domain_info) {
-    // Ensure score is a number between 0 and 100
-    const numericScore = Math.max(0, Math.min(100, Number(score)));
+// --- Popup State Management ---
+function savePopupState(tabId) {
+    const state = {
+        domainWarning: domainWarningDiv ? {
+            text: domainWarningDiv.textContent,
+            style: { // Capture all relevant styles applied by JS
+                display: domainWarningDiv.style.display,
+                color: domainWarningDiv.style.color,
+                backgroundColor: domainWarningDiv.style.backgroundColor,
+                borderColor: domainWarningDiv.style.borderColor,
+                marginTop: domainWarningDiv.style.marginTop,
+                padding: domainWarningDiv.style.padding,
+                borderWidth: domainWarningDiv.style.borderWidth,
+                borderStyle: domainWarningDiv.style.borderStyle,
+                borderRadius: domainWarningDiv.style.borderRadius,
+            }
+        } : null,
+        scoreTextDisplay: scoreTextDisplayDiv && progressBarDiv ? {
+            text: scoreTextDisplayDiv.textContent,
+            width: progressBarDiv.style.width,
+            className: progressBarDiv.className
+        } : null,
+        resultsDisplay: resultsDiv ? resultsDiv.style.display : null,
+        errorText: errorP ? errorP.textContent : null,
+        sliderValue: scanSensitivitySlider ? scanSensitivitySlider.value : "1" // Save slider position
+    };
+    chrome.storage.local.set({ [`popupState_${tabId}`]: state }, () => {
+        if (chrome.runtime.lastError) {
+            console.error("Error saving popup state:", chrome.runtime.lastError.message);
+        } else {
+            console.log("Popup state saved for tab:", tabId);
+        }
+    });
+}
 
-    resultsDiv.style.display = 'flex'; // Show results container
-    errorP.textContent = ''; // Clear previous errors
+function restorePopupState(tabId) {
+    const key = `popupState_${tabId}`;
+    chrome.storage.local.get([key], (data) => {
+        if (chrome.runtime.lastError) {
+            console.error("Error restoring popup state:", chrome.runtime.lastError.message);
+            return;
+        }
+        const state = data[key];
+        if (!state) {
+            clearResults(); // If no state, ensure UI is clear
+            if (scanSensitivitySlider) updateSliderAppearance(scanSensitivitySlider.value || "1");
+            return;
+        }
 
-    // Update score text display
-    scoreTextDisplayDiv.textContent = `${numericScore} / 100`;
+        console.log("Restoring popup state for tab:", tabId, state);
 
-    // Determine color class based on score
-    let colorClass = 'score-red'; // Default to red
-    if (numericScore >= 90) {
-        colorClass = 'score-green';
-    } else if (numericScore >= 70) {
-        colorClass = 'score-yellow';
-    }
+        if (state.domainWarning && domainWarningDiv) {
+            domainWarningDiv.textContent = state.domainWarning.text;
+            Object.assign(domainWarningDiv.style, state.domainWarning.style);
+        } else if (domainWarningDiv) {
+            domainWarningDiv.style.display = 'none';
+        }
 
-    // Apply styles to the progress bar
-    progressBarDiv.style.width = `${numericScore}%`;
-    // Remove old color classes and add the new one
-    progressBarDiv.classList.remove('score-red', 'score-yellow', 'score-green');
-    progressBarDiv.classList.add(colorClass);
+        if (state.scoreTextDisplay && scoreTextDisplayDiv && progressBarDiv) {
+            scoreTextDisplayDiv.textContent = state.scoreTextDisplay.text;
+            progressBarDiv.style.width = state.scoreTextDisplay.width;
+            progressBarDiv.className = state.scoreTextDisplay.className;
+        } else if (scoreTextDisplayDiv && progressBarDiv) {
+            scoreTextDisplayDiv.textContent = '-- / 100';
+            progressBarDiv.style.width = '0%';
+            progressBarDiv.className = 'progress-bar';
+        }
+        
+        if (state.resultsDisplay && resultsDiv) {
+            resultsDiv.style.display = state.resultsDisplay;
+        } else if (resultsDiv) {
+            resultsDiv.style.display = 'none';
+        }
 
-    if (!domain_info.isUnreliable && numericScore <= 50) {
-        chrome.runtime.sendMessage({
-            action: "logNewUnreliableDomain",
-            score: numericScore,
-            domain: domain_info.name
-        });
-    }
+        if (state.errorText && errorP) {
+            errorP.textContent = state.errorText;
+        } else if (errorP) {
+            errorP.textContent = '';
+        }
+
+        if (state.sliderValue && scanSensitivitySlider) {
+            scanSensitivitySlider.value = state.sliderValue;
+            updateSliderAppearance(state.sliderValue); // Update label and colors
+        } else if (scanSensitivitySlider) {
+             updateSliderAppearance("1"); // Default if not in state
+        }
+        
+        // If results are visible, it implies a scan was done, so keep button enabled
+        // unless loading is also part of state (which it isn't currently)
+         if (startScanButton) {
+            const apiKeyIsSet = apiKeyStatus && apiKeyStatus.className.includes('success');
+            startScanButton.disabled = !apiKeyIsSet; // Only enable if API key is set
+        }
+    });
 }
 
 
 // --- Helper Functions ---
+function sendHighlightRequestToContentScript(flags, tabId, sens) {
+    const action = { action: "highlightText", flags: flags, sens: sens }; // Pass sensitivity
+    if (!tabId) {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs.length > 0 && tabs[0].id) {
+                chrome.tabs.sendMessage(tabs[0].id, action, response => {
+                    if (chrome.runtime.lastError) {
+                        console.warn("Could not send highlight request (no tabId):", chrome.runtime.lastError.message);
+                    }
+                });
+            }
+        });
+    } else {
+        chrome.tabs.sendMessage(tabId, action, response => {
+             if (chrome.runtime.lastError) {
+                console.warn("Could not send highlight request (with tabId):", chrome.runtime.lastError.message);
+            }
+        });
+    }
+}
+
+function displayScoreBar(score, domainInfo) {
+    if (!resultsDiv || !errorP || !scoreTextDisplayDiv || !progressBarDiv) return; // Element checks
+    const numericScore = Math.max(0, Math.min(100, Number(score)));
+    resultsDiv.style.display = 'flex'; // Use flex as per new CSS
+    errorP.textContent = '';
+
+    scoreTextDisplayDiv.textContent = `${numericScore} / 100`;
+
+    let colorClass = 'score-red'; // Default
+    // Using your original score thresholds for colors:
+    if (numericScore >= 90) colorClass = 'score-green';
+    else if (numericScore >= 70) colorClass = 'score-yellow';
+
+
+    progressBarDiv.style.width = `${numericScore}%`;
+    progressBarDiv.className = 'progress-bar'; // Reset classes
+    progressBarDiv.classList.add(colorClass);
+
+    // Log domain if it's not marked unreliable and scores low (your existing logic)
+    if (domainInfo && !domainInfo.isUnreliable && numericScore <= 50 && domainInfo.name) {
+        chrome.runtime.sendMessage({
+            action: "logNewUnreliableDomain",
+            score: numericScore,
+            domain: domainInfo.name
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.warn("Error logging unreliable domain:", chrome.runtime.lastError.message);
+            }
+        });
+    }
+}
+
 function showLoading(isLoading) {
-    loadingIndicator.style.display = isLoading ? 'block' : 'none';
-    analyzeButtonL.disabled = isLoading;
-    analyzeButtonM.disabled = isLoading;
-    analyzeButtonD.disabled = isLoading;
+    if (loadingIndicator) loadingIndicator.style.display = isLoading ? 'flex' : 'none'; // Use flex for spinner
+    if (startScanButton) startScanButton.disabled = isLoading;
+    if (scanSensitivitySlider) scanSensitivitySlider.disabled = isLoading;
 }
 
 function showError(message) {
-    resultsDiv.style.display = 'none'; // Hide results on error
-    errorP.textContent = `Error: ${message}`;
+    if (resultsDiv) resultsDiv.style.display = 'none';
+    if (errorP) errorP.textContent = `Error: ${message}`; // errorP has class error-message in new HTML
     console.error("Error displayed to user:", message);
-    showLoading(false);
+    showLoading(false); // Ensure loading is hidden on error
 }
 
 function clearResults() {
-    // Clear score text
-    scoreTextDisplayDiv.textContent = '-- / 100';
-    // Reset progress bar
-    progressBarDiv.style.width = '0%';
-    progressBarDiv.classList.remove('score-red', 'score-yellow', 'score-green');
-    // progressBarDiv.textContent = ''; // Clear text inside bar if used
-
-    // Clear raw text
-    analysisRawTextPre.textContent = '';
-    analysisRawTextPre.style.display = 'none';
-    // Clear errors and hide results div
-    errorP.textContent = '';
-    resultsDiv.style.display = 'none';
-
-    // Clear domain warning
-    if (domainWarningDiv) {
-        domainWarningDiv.textContent = '';
-        domainWarningDiv.style.display = 'none';
+    if (scoreTextDisplayDiv) scoreTextDisplayDiv.textContent = '-- / 100';
+    if (progressBarDiv) {
+        progressBarDiv.style.width = '0%';
+        progressBarDiv.className = 'progress-bar';
     }
+    if (analysisRawTextPre) { // Check if it exists
+        analysisRawTextPre.textContent = '';
+        analysisRawTextPre.style.display = 'none';
+    }
+    if (errorP) errorP.textContent = '';
+    if (resultsDiv) resultsDiv.style.display = 'none';
+    if (domainWarningDiv) domainWarningDiv.style.display = 'none';
 
-    // Clear previous highlights on the page
-    sendHighlightRequestToContentScript(null);
+    sendHighlightRequestToContentScript(null); // Clear highlights on the page
 }
