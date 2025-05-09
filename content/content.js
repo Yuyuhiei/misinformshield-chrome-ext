@@ -24,13 +24,30 @@ function extractPageText() { /* ... */ }
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "getText") {
         console.log("Content script received getText request.");
-        const text = extractPageText();
-        if (text) {
-            sendResponse({ success: true, text: text });
-        } else {
-            console.error("Failed to extract text from the page.");
-            sendResponse({ success: false, error: "Could not extract text." });
-        }
+        (async () => {
+            try {
+                // Await the result of the async function
+                const start = performance.now();
+                const text = await extractPageText(); // Use the enhanced function name
+
+                const end = performance.now(); // End timer
+                const elapsed = (end - start).toFixed(2); // In milliseconds with 2 decimals
+
+                console.log(`Text extraction completed in ${elapsed} ms`);
+
+                if (text && text !== "Content extraction failed or page has no significant text.") {
+
+                    console.log("Successfully extracted text.");
+                    sendResponse({ success: true, text: text });
+                } else {
+                    console.error("Failed to extract significant text from the page.");
+                    sendResponse({ success: false, error: "Could not extract significant text." });
+                }
+            } catch (error) {
+                console.error("Error during text extraction:", error);
+                sendResponse({ success: false, error: `Extraction failed: ${error.message}` });
+            }
+        })();
         return true; // Indicate asynchronous response potential
     }
     else if (request.action === "highlightText") {
@@ -38,7 +55,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         clearHighlights(); // Remove previous highlights first
         if (request.flags && request.flags.length > 0) {
             try {
-                highlightSnippets(request.flags);
+                highlightSnippets(request.flags, request.sens);
                 sendResponse({ success: true });
             } catch (error) {
                  console.error("Error during highlighting:", error);
@@ -53,9 +70,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
      // *** NEW: Handle response from background script's verification ***
      else if (request.action === "verificationResult") {
          if (request.success) {
-             updateModalContent(request.summary, request.sources);
+             updateModalContent(request.summary, request.sources, request.sens);
          } else {
-             updateModalContent(`Error verifying snippet: ${request.error}`, []);
+             updateModalContent(`Error verifying snippet: ${request.error}`, [], request.sens);
          }
          // No need to sendResponse back to background script
      }
@@ -70,55 +87,74 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  let modalSourcesUl = null;
  let modalLoadingDiv = null;
 
- // --- Modal Management Functions ---
- function showModal(snippet, reason) {
-     // Ensure elements are assigned (might be redundant if initModalElements is guaranteed to run first)
-     if (!modalOverlay) initModalElements();
-     if (!modalOverlay) {
-         console.error("Modal overlay not found!");
-         return;
-     }
-     console.log("Showing modal for:", snippet);
-     modalSnippetDiv.textContent = snippet;
-     modalReasonDiv.textContent = reason;
-     modalSummaryDiv.textContent = ''; // Clear previous summary
-     modalSourcesUl.innerHTML = ''; // Clear previous sources
-     modalLoadingDiv.style.display = 'block'; // Show loading indicator
-     modalOverlay.classList.add('visible');
- }
+// --- Modal Management Functions ---
+function showModal(snippet, reason) {
+    // Ensure elements are assigned (might be redundant if initModalElements is guaranteed to run first)
+    if (!modalOverlay) {
+        console.error("Modal overlay not found!");
+        return;
+    }
+    console.log("Showing modal for:", snippet);
+
+    // Set the modal content
+    modalSnippetDiv.textContent = snippet;
+    modalReasonDiv.textContent = reason;
+    modalSummaryDiv.textContent = ''; // Clear previous summary
+    modalLoadingDiv.style.display = 'block'; // Show loading indicator
+    
+    // Show the modal
+    modalOverlay.classList.add('visible');
+}
 
  function hideModal() {
       if (!modalOverlay) return;
       modalOverlay.classList.remove('visible');
  }
 
- function updateModalContent(summary, sources) {
-     modalSummaryDiv.textContent = summary || "No explanation provided.";
-     modalSourcesUl.innerHTML = ''; // Clear previous sources
+ function updateModalContent(summary, sources, sens) {
+    console.log("Extracted Summary:", summary);
+    console.log("Extracted Sources:", sources);
+    console.log("Sens", sens);
+    modalSummaryDiv.textContent = summary || "No explanation provided.";
 
-     if (sources && sources.length > 0) {
-         sources.forEach(url => {
-             if (url) { // Ensure URL is not empty string
-                 const li = document.createElement('li');
-                 const a = document.createElement('a');
-                 a.href = url;
-                 a.textContent = url;
-                 a.target = '_blank'; // Open in new tab
-                 a.rel = 'noopener noreferrer'; // Security best practice
-                 li.appendChild(a);
-                 modalSourcesUl.appendChild(li);
-             }
-         });
-     } else {
-         const li = document.createElement('li');
-         li.textContent = 'No supporting sources found.';
-         li.className = 'no-sources';
-         modalSourcesUl.appendChild(li);
-     }
+    // Clear and prepare sources container
+    const sourcesContainer = document.getElementById("modal-sources-container");
+    sourcesContainer.innerHTML = ''; // Clear previous content
 
-     modalLoadingDiv.style.display = 'none'; // Hide loading indicator
- }
+    // Only display sources if it's a deep scan
+    if (sens == 'deep') {
+        const heading = document.createElement('h4');
+        heading.textContent = 'Supporting Sources:';
+        const list = document.createElement('ul');
+        list.id = MODAL_SOURCES_ID;  // Set the id for the sources list
 
+        if (sources && sources.length > 0) {
+            sources.forEach(url => {
+                if (url) { // Ensure URL is not empty string
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.textContent = url;
+                    a.target = '_blank'; // Open in new tab
+                    a.rel = 'noopener noreferrer'; // Security best practice
+                    li.appendChild(a);
+                    list.appendChild(li);  // Append to the list, not modalSourcesUl
+                }
+            });
+        } else {
+            const li = document.createElement('li');
+            li.textContent = 'No supporting sources found.';
+            li.className = 'no-sources';
+            list.appendChild(li); // Append to the list
+        }
+
+        // Append the heading and the sources list to the container
+        sourcesContainer.appendChild(heading);
+        sourcesContainer.appendChild(list);
+    }
+    
+    modalLoadingDiv.style.display = 'none'; // Hide loading indicator
+}
 
  // --- Highlighting Logic ---
 
@@ -145,7 +181,7 @@ function clearHighlights() {
 }
 
 
-function highlightSnippets(flags) {
+function highlightSnippets(flags, sens) {
     console.log("Starting highlighting process...");
     flags.forEach((flag, index) => {
         const snippetText = flag.snippet.trim(); // Trim whitespace
@@ -190,7 +226,7 @@ function highlightSnippets(flags) {
                         iconSpan.dataset.reason = reason;
 
                         // *** Add click listener ***
-                        iconSpan.addEventListener('click', handleIconClick);
+                        iconSpan.addEventListener('click', (event) => handleIconClick(event, sens));
 
                         // Wrap the found text range with the highlight span
                         range.surroundContents(highlightSpan);
@@ -221,7 +257,7 @@ function highlightSnippets(flags) {
 }
 
 // --- Icon Click Handler ---
-function handleIconClick(event) {
+function handleIconClick(event, sens) {
     event.preventDefault(); // Prevent any default action
     event.stopPropagation(); // Stop event bubbling
 
@@ -235,7 +271,7 @@ function handleIconClick(event) {
         // Send message to background script to start verification
         console.log("Sending snippet to background for verification:", snippet);
         chrome.runtime.sendMessage(
-            { action: "verifySnippet", snippet: snippet, reason: reason },
+            { action: "verifySnippet", snippet: snippet, reason: reason, sens: sens },
             (response) => {
                 // Handle immediate errors from background (e.g., API key missing)
                 if (chrome.runtime.lastError) {
@@ -435,17 +471,15 @@ function createVerificationModal() {
         <h4>Explanation:</h4>
         <div id="${MODAL_SUMMARY_ID}"></div>
         <div id="${MODAL_LOADING_ID}">Loading verification details...</div>
-        <h4>Supporting Sources:</h4>
-        <ul id="${MODAL_SOURCES_ID}"></ul>
+        <div id="modal-sources-container"></div>
     `;
 
     overlay.appendChild(content);
     document.body.appendChild(overlay);
 
-    // Close functionality moved to initModalElements to ensure elements exist
+    // Call initModalElements AFTER modal structure is appended
+    initModalElements(); 
 }
-
-createVerificationModal(); // Create the modal structure when script loads
 
 // --- Assign Modal Element Variables (after creation) ---
 function initModalElements() {
@@ -454,52 +488,90 @@ function initModalElements() {
     modalSnippetDiv = document.getElementById(MODAL_SNIPPET_ID);
     modalReasonDiv = document.getElementById(MODAL_REASON_ID);
     modalSummaryDiv = document.getElementById(MODAL_SUMMARY_ID);
-    modalSourcesUl = document.getElementById(MODAL_SOURCES_ID);
     modalLoadingDiv = document.getElementById(MODAL_LOADING_ID);
+    
+    // No need to check for modalSourcesUl anymore as it's part of the structure now
+    modalSourcesUl = document.createElement('ul');  // Create dynamically, as it's not part of the initial structure
 
     // Add close functionality here as well, ensuring it's attached after creation
     const closeButton = document.getElementById(MODAL_CLOSE_ID);
-     if (closeButton) {
+    if (closeButton) {
         closeButton.addEventListener('click', hideModal);
-     } else {
-         console.error("Modal close button not found during init!");
-     }
-     if (modalOverlay) {
+    } else {
+        console.error("Modal close button not found during init!");
+    }
+    if (modalOverlay) {
         modalOverlay.addEventListener('click', (event) => {
             if (event.target === modalOverlay) {
                 hideModal();
             }
         });
-     } else {
-          console.error("Modal overlay not found during init!");
-     }
+    } else {
+        console.error("Modal overlay not found during init!");
+    }
 }
 
-// Initialize modal elements immediately after creation
-initModalElements();
+// Create the modal when the script loads
+createVerificationModal();
 
 
 // --- Text Extraction Logic ---
-function extractPageText() {
-    const mainContentSelectors = ['article', 'main', '.post-content', '.entry-content', '#content', '#main-content'];
-    let mainText = '';
-    let foundContent = false;
+async function extractPageText() { // no timeout logic, less robust but more efficient
+    const mainContentSelectors = [
+        'article[class*="article"]', 'article.post', 'article.story',
+        'div[class*="article-body"]', 'div[class*="post-content"]',
+        'div[class*="entry-content"]', 'div[class*="story-content"]',
+        'div[id*="article-content"]', 'div[itemprop="articleBody"]',
+        'section[class*="article-content"]', 'div.main-content', 'div#main-content',
+        'div.td-post-content', 'div.content__body', 'main[id*="main"]',
+        'article', 'main', '.post-content', '.entry-content', '#content', '#main-content'
+    ];
+
+    const selectorsToRemove = [
+        'nav', 'header', 'footer', 'aside', 'script', 'style',
+        '.sidebar', '#sidebar', '.ads', '.advertisement', '.ad-slot', 'div[class*="ad"]',
+        '.comments', '#comments', '.comment-section', '.related-articles', '.related-posts',
+        'div[class*="related"]', '.social-share', '.sharing-buttons', 'div[class*="share"]',
+        '.author-bio', '.author-box', '.newsletter-signup', 'div[class*="newsletter"]',
+        '.print-button', '.email-button', 'figure > figcaption', '.breaking-news-banner',
+        '#top-navigation', '.site-header', '.site-footer', 'form', 'ul[class*="nav"]',
+        'div[class*="cookie"]', 'div[id*="cookie"]', 'div[class*="banner"]'
+    ];
+
+    let mainElement = null;
+
     for (const selector of mainContentSelectors) {
         const element = document.querySelector(selector);
-        if (element) {
-            mainText = element.innerText; foundContent = true; break;
+        if (element && element.innerText && element.innerText.trim().length > 100) {
+            mainElement = element;
+            console.log("Found main content with selector:", selector);
+            break;
         }
     }
-    if (!foundContent) {
+
+    let mainText = '';
+
+    if (mainElement) {
+        const clone = mainElement.cloneNode(true);
+        selectorsToRemove.forEach(sel => clone.querySelectorAll(sel).forEach(el => el.remove()));
+        mainText = clone.innerText;
+    } else {
+        console.log("Falling back to full body cleanup.");
         const bodyClone = document.body.cloneNode(true);
-        const selectorsToRemove = ['nav', 'header', 'footer', 'aside', 'script', 'style', '.sidebar', '#sidebar', '.ads', '.advertisement'];
-        selectorsToRemove.forEach(selector => { bodyClone.querySelectorAll(selector).forEach(el => el.remove()); });
+        selectorsToRemove.forEach(sel => bodyClone.querySelectorAll(sel).forEach(el => el.remove()));
         mainText = bodyClone.innerText;
     }
-    mainText = mainText.replace(/(\s\s+|\n\n+)/g, '\n').trim();
-    const MAX_LENGTH = 10000;
+
+    mainText = mainText
+        .replace(/(\s*\n\s*){3,}/g, '\n\n') // Limit newlines
+        .replace(/[ \t\r]+/g, ' ')          // Remove excess whitespace
+        .split('\n').map(line => line.trim()).filter(line => line).join('\n')
+        .trim();
+
+    const MAX_LENGTH = 15000;
     if (mainText.length > MAX_LENGTH) {
         mainText = mainText.substring(0, MAX_LENGTH) + "... (truncated)";
     }
-    return mainText;
+
+    return mainText || "Content extraction failed or page has no significant text.";
 }
