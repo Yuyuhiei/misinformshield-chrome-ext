@@ -432,17 +432,7 @@ Provide your response strictly in the following JSON format:
 }
 \`\`\`
 
-If no sources are found, return empty strings as follows:
-\`\`\`json
-{
-    "summary": "Your explanation here.",
-    "sources": [
-        "",
-        "",
-        ""
-    ]
-}
-\`\`\`
+If you cannot find 3 credible sources, provide as many as you can find (minimum 1 if possible) and leave the remaining entries as empty strings (""). If you cannot provide a meaningful explanation or find any sources, return an empty summary and an empty sources array. Ensure the entire output is valid JSON.
 
 JSON Verification:`;
     } else {
@@ -467,10 +457,10 @@ If no meaningful explanation can be provided, return an empty summary and an emp
 JSON Verification:`;
     }
     // --- End Prompt Engineering ---
-
     console.log(`Sending snippet to Gemini API for verification: "${snippet.substring(0, 50)}..."`);
 
     try {
+        console.log(prompt);
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

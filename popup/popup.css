@@ -49,7 +49,7 @@ h2 {
 }
 
 /* API Key Section Styling */
-.api-key-section {
+.api-key-section, .info-section {
     background-color: #e9e9f4;
     padding: 10px;
     border-radius: 5px;
@@ -62,6 +62,38 @@ h2 {
     margin-bottom: 5px;
     font-weight: bold;
     font-size: 0.9em;
+}
+
+.title-label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    font-size: 1.2em;
+    text-align: center; /* centers the text horizontally */
+}
+
+.scan-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 5px;
+}
+
+.scan-row label {
+    font-weight: bold;
+    min-width: 100px;
+}
+
+.label-light {
+    color: #4CAF50; /* green */
+}
+
+.label-medium {
+    color: #FF9800; /* orange */
+}
+
+.label-deep {
+    color: #F44336; /* red */
 }
 
 .api-key-section input[type="password"] {
@@ -77,6 +109,11 @@ h2 {
     display: flex;
     flex-direction: row;
     gap: 1rem;
+}
+
+.key-buttons {
+    display: flex;
+    flex-direction: row;
 }
 
 button {
@@ -104,6 +141,28 @@ button:hover {
     background-color: #27ae60;
 }
 
+/* scan buttons styles */
+
+#analyzeButtonL {
+    background-color: #4CAF50; /* Green - Light Scan */
+}
+#analyzeButtonL:hover {
+    background-color: #45a049;
+}
+
+#analyzeButtonM {
+    background-color: #FF9800; /* Orange - Medium Scan */
+}
+#analyzeButtonM:hover {
+    background-color: #e68900;
+}
+
+#analyzeButtonD {
+    background-color: #F44336; /* Red - Deep Scan */
+}
+#analyzeButtonD:hover {
+    background-color: #d7382c;
+}
 
 #loadingIndicator {
     text-align: center;

@@ -16,7 +16,10 @@ const apiKeyInput = document.getElementById('apiKey');
 const saveApiKeyButton = document.getElementById('saveApiKey');
 const apiKeyStatus = document.getElementById('apiKeyStatus');
 const toggleApiKeyButton = document.getElementById('toggleApiKeyButton'); // New button
+const toggleInfoButton = document.getElementById('toggleInfoButton'); // New button
 const apiKeyInputArea = document.getElementById('apiKeyInputArea'); // The div containing the input/button
+const infoArea = document.getElementById('infoArea'); // The div containing the input/button
+const infoSeparator = document.getElementById('infoSeparator'); // The div containing the input/button
 const apiKeySeparator = document.getElementById('apiKeySeparator'); // The <hr> separator
 
 // --- API Key Handling ---
@@ -172,6 +175,12 @@ toggleApiKeyButton.addEventListener('click', () => {
             }
         });
     }
+});
+
+toggleInfoButton.addEventListener('click', () => {
+    const isHidden = infoArea.style.display === 'none';
+    infoArea.style.display = isHidden ? 'block' : 'none';
+    infoSeparator.style.display = isHidden ? 'block' : 'none';
 });
 // --- (End API Key Handling) ---
 

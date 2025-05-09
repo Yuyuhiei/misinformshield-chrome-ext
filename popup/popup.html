@@ -10,7 +10,10 @@
     <div class="container">
         <div class="header-section">
             <h1>MisinformShield Analysis</h1>
-            <button id="toggleApiKeyButton" class="icon-button" title="Manage API Key">🔑</button>
+            <div class="key-buttons">
+                <button id="toggleInfoButton" class="icon-button" title="Manage API Key">❔</button>
+                <button id="toggleApiKeyButton" class="icon-button" title="Manage API Key">🔑</button>
+            </div>
         </div>
 
         <div id="apiKeyInputArea" class="api-key-section" style="display: none;">
@@ -20,6 +23,24 @@
             <p id="apiKeyStatus" class="status"></p>
         </div>
         <hr id="apiKeySeparator" style="display: none;">
+
+        <div id="infoArea" class="info-section" style="display: none;">
+            <label for="info-label" class="title-label">Type of Scans</label>
+        
+            <div class="scan-row">
+                <label class="label-light" for="p-label">Light Scan:</label>
+                <p>Only checks for fake news and misinformation.</p>
+            </div>
+            <div class="scan-row">
+                <label class="label-medium" for="p-label">Medium Scan:</label>
+                <p>Checks fake news, misinformation, biased and strong statements.</p>
+            </div>
+            <div class="scan-row">
+                <label class="label-deep" for="p-label">Deep Scan:</label>
+                <p>Just like medium scan, but also searches for credible sources that validate flagged snippets as misinformation.</p>
+            </div>
+        </div>
+        <hr id="infoSeparator" style="display: none;">
 
         <div class="buttons">
             <button id="analyzeButtonL">Light Scan</button>
