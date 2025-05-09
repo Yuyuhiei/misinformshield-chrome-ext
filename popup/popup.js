@@ -1,6 +1,8 @@
 // popup/popup.js
 
-const analyzeButton = document.getElementById('analyzeButton');
+const analyzeButtonL = document.getElementById('analyzeButtonL');
+const analyzeButtonM = document.getElementById('analyzeButtonM');
+const analyzeButtonD = document.getElementById('analyzeButtonD');
 const resultsDiv = document.getElementById('results');
 const analysisRawTextPre = document.getElementById('analysisRawText');
 const loadingIndicator = document.getElementById('loadingIndicator');
@@ -24,14 +26,97 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result.geminiApiKey) {
             apiKeyStatus.textContent = 'API Key is set.';
             apiKeyStatus.style.color = 'green';
-            analyzeButton.disabled = false; // Enable analyze button if key exists
+            analyzeButtonL.disabled = false; // Enable analyze button if key exists
+            analyzeButtonM.disabled = false; // Enable analyze button if key exists
+            analyzeButtonD.disabled = false; // Enable analyze button if key exists
         } else {
             apiKeyStatus.textContent = 'API Key not set. Click 🔑 to add.';
             apiKeyStatus.style.color = '#e74c3c'; // Use error color
-            analyzeButton.disabled = true; // Disable analyze button if no key
+            analyzeButtonL.disabled = true; // Disable analyze button if no key
+            analyzeButtonM.disabled = true; // Disable analyze button if no key
+            analyzeButtonD.disabled = true; // Disable analyze button if no key
         }
+
+         // Now do reload detection and restore/clear per-tab state
+         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const tabId = tabs[0].id;
+            const navEntries = performance.getEntriesByType("navigation");
+            const isReload = navEntries.length && navEntries[0].type === "reload";
+
+            if (isReload) {
+                console.log("reloaded");
+                clearResults();
+            } else {
+                restorePopupState(tabId);
+            }
+        });
     });
+
+    
 });
+
+// this is a function to save the popup state after analysis
+function savePopupState() {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tabId = tabs[0].id;
+    
+        const state = {
+            domainWarning: {
+                text: domainWarningDiv.textContent,
+                style: {
+                    marginTop: domainWarningDiv.style.marginTop,
+                    padding: domainWarningDiv.style.padding,
+                    border: domainWarningDiv.style.border,
+                    borderRadius: domainWarningDiv.style.borderRadius,
+                    display: domainWarningDiv.style.display,
+                    color: domainWarningDiv.style.color,
+                    backgroundColor: domainWarningDiv.style.backgroundColor,
+                    borderColor: domainWarningDiv.style.borderColor
+                }
+            },
+            scoreTextDisplay: {
+                text: scoreTextDisplayDiv.textContent,
+                width: progressBarDiv.style.width,
+                className: progressBarDiv.className
+            },
+            results: resultsDiv.style.display,
+            errorText: errorP.textContent
+        };
+    
+        chrome.storage.local.set({ [`popupState_${tabId}`]: state });
+    });
+}
+
+function restorePopupState() {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tabId = tabs[0].id;
+        const key = `popupState_${tabId}`;
+
+        chrome.storage.local.get([key], (data) => {
+            const state = data[key];
+            if (!state) return;
+
+            if (state.domainWarning && domainWarningDiv) {
+                domainWarningDiv.textContent = state.domainWarning.text;
+                Object.assign(domainWarningDiv.style, state.domainWarning.style);
+            }
+
+            if (state.scoreTextDisplay && scoreTextDisplayDiv && progressBarDiv) {
+                scoreTextDisplayDiv.textContent = state.scoreTextDisplay.text;
+                progressBarDiv.style.width = state.scoreTextDisplay.width;
+                progressBarDiv.className = state.scoreTextDisplay.className;
+            }
+
+            if (state.results && resultsDiv) {
+                resultsDiv.style.display = state.results;
+            }
+
+            if (state.errorText && errorP) {
+                errorP.textContent = state.errorText;
+            }
+        });
+    });
+}
 
 saveApiKeyButton.addEventListener('click', () => {
     const apiKey = apiKeyInput.value.trim();
@@ -44,7 +129,9 @@ saveApiKeyButton.addEventListener('click', () => {
                 apiKeyStatus.textContent = 'API Key saved successfully!';
                 apiKeyStatus.style.color = 'green';
                 apiKeyInput.value = ''; // Clear the input field
-                analyzeButton.disabled = false; // Enable analyze button
+                analyzeButtonL.disabled = false; // Enable analyze button
+                analyzeButtonM.disabled = false; // Enable analyze button
+                analyzeButtonD.disabled = false; // Enable analyze button
                 // Optionally hide the section after saving
                 // apiKeyInputArea.style.display = 'none';
                 // apiKeySeparator.style.display = 'none';
@@ -88,15 +175,47 @@ toggleApiKeyButton.addEventListener('click', () => {
 });
 // --- (End API Key Handling) ---
 
+// --- Used for checking logging new unreliable domain ---
+// analyzeButton.addEventListener('click', () => {
+//     console.log("Analyze button clicked.");
+//     const domain_info_test = {      // Add domain info to the response
+//         name: 'example.com',
+//         isUnreliable: false,
+//         reliability: null
+//     }
+//     displayScoreBar(30, domain_info_test); // Temporary for testing
+// });
 
 // --- Analysis Trigger ---
-analyzeButton.addEventListener('click', () => {
+analyzeButtonL.addEventListener('click', () => {
     console.log("Analyze button clicked.");
     clearResults();
     showLoading(true);
     // Clear previous highlights on the page
     sendHighlightRequestToContentScript(null); // Send null to clear
+    analyzeTextQuery('light')
+}); // End analyzeButtonL listener
 
+analyzeButtonM.addEventListener('click', () => {
+    console.log("Analyze button clicked.");
+    clearResults();
+    showLoading(true);
+    // Clear previous highlights on the page
+    sendHighlightRequestToContentScript(null); // Send null to clear
+    analyzeTextQuery('medium')
+}); // End analyzeButtonM listener
+
+analyzeButtonD.addEventListener('click', () => {
+    console.log("Analyze button clicked.");
+    clearResults();
+    showLoading(true);
+    // Clear previous highlights on the page
+    sendHighlightRequestToContentScript(null); // Send null to clear
+    analyzeTextQuery('deep')
+}); // End analyzeButtonD listener
+
+
+function analyzeTextQuery(sens) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (!tabs || tabs.length === 0 || !tabs[0].id) {
             showError("Could not find active tab.");
@@ -113,9 +232,10 @@ analyzeButton.addEventListener('click', () => {
                     showLoading(false); return;
                 }
                 if (response && response.success && response.text) {
+                    console.log(response.text)
                     // Send text to background for analysis
                     chrome.runtime.sendMessage(
-                        { action: "analyzeText", text: response.text },
+                        { action: "analyzeText", text: response.text, sens: sens },
                         (analysisResponse) => {
                             showLoading(false); // Hide loading indicator once response received
                             if (chrome.runtime.lastError) {
@@ -128,7 +248,7 @@ analyzeButton.addEventListener('click', () => {
                             if (analysisResponse && analysisResponse.success) {
                                 // Display score bar (if score exists)
                                 if (typeof analysisResponse.score !== 'undefined') {
-                                    displayScoreBar(analysisResponse.score);
+                                    displayScoreBar(analysisResponse.score, analysisResponse.domainInfo);
                                 } else {
                                     console.warn("Score missing from analysis response.");
                                     // Optionally display a message or default bar
@@ -138,19 +258,41 @@ analyzeButton.addEventListener('click', () => {
                                 }
 
                                 // *** Display Domain Warning ***
-                                if (analysisResponse.domainInfo && analysisResponse.domainInfo.isUnreliable) {
-                                    if(domainWarningDiv) {
-                                        domainWarningDiv.textContent = `⚠️ Warning: The domain "${analysisResponse.domainInfo.name}" is often associated with unreliable information.`;
-                                        domainWarningDiv.style.display = 'block'; // Make it visible
-                                        domainWarningDiv.style.color = '#e74c3c'; // Use warning color
-                                        domainWarningDiv.style.marginTop = '10px'; // Add some spacing
+                                if (analysisResponse.domainInfo && typeof analysisResponse.domainInfo.reliability === 'number') {
+                                    const reliability = analysisResponse.domainInfo.reliability;
+                                    const domain = analysisResponse.domainInfo.name;
+                                
+                                    if (domainWarningDiv) {
+                                        domainWarningDiv.style.marginTop = '10px';
                                         domainWarningDiv.style.padding = '8px';
-                                        domainWarningDiv.style.border = '1px solid #e74c3c';
+                                        domainWarningDiv.style.border = '1px solid';
                                         domainWarningDiv.style.borderRadius = '4px';
-                                        domainWarningDiv.style.backgroundColor = '#fbeae5';
+                                
+                                        if (reliability <= 5) {
+                                            // Unreliable
+                                            domainWarningDiv.textContent = `⚠️ Warning: The domain "${domain}" is frequently associated with unreliable information (Reliability: ${reliability}/10).`;
+                                            domainWarningDiv.style.display = 'block';
+                                            domainWarningDiv.style.color = '#e74c3c'; // red
+                                            domainWarningDiv.style.borderColor = '#e74c3c';
+                                            domainWarningDiv.style.backgroundColor = '#fbeae5';
+                                        } else if (reliability >= 9) {
+                                            // Highly reliable
+                                            domainWarningDiv.textContent = `✅ Trusted Source: The domain "${domain}" has a high reliability rating (${reliability}/10).`;
+                                            domainWarningDiv.style.display = 'block';
+                                            domainWarningDiv.style.color = '#2e7d32'; // green
+                                            domainWarningDiv.style.borderColor = '#2e7d32';
+                                            domainWarningDiv.style.backgroundColor = '#e8f5e9';
+                                        } else {
+                                            // Medium reliability
+                                            domainWarningDiv.textContent = `ℹ️ Info: The domain "${domain}" has a moderate reliability score (${reliability}/10). Interpret with care.`;
+                                            domainWarningDiv.style.display = 'block';
+                                            domainWarningDiv.style.color = '#f39c12'; // amber
+                                            domainWarningDiv.style.borderColor = '#f39c12';
+                                            domainWarningDiv.style.backgroundColor = '#fff4e5';
+                                        }
                                     }
                                 } else if (domainWarningDiv) {
-                                    domainWarningDiv.style.display = 'none'; // Hide if not unreliable or info missing
+                                    domainWarningDiv.style.display = 'none'; // No info available
                                 }
 
                                 // Store raw analysis text (hidden) - Keep this if needed for debugging or future features
@@ -159,12 +301,13 @@ analyzeButton.addEventListener('click', () => {
                                 // *** Send flags to content script for highlighting ***
                                 if (analysisResponse.flags && analysisResponse.flags.length > 0) {
                                     console.log("Sending flags to content script:", analysisResponse.flags);
-                                    sendHighlightRequestToContentScript(analysisResponse.flags, activeTabId);
+                                    sendHighlightRequestToContentScript(analysisResponse.flags, activeTabId, sens);
                                 } else {
                                     console.log("No flags received from analysis.");
                                     // Optionally display a message in the popup
                                 }
-
+                                // save state after analysis
+                                savePopupState();
                             } else {
                                 // Handle analysis failure reported by background script
                                 showError(analysisResponse.error || "Analysis failed. Check background logs.");
@@ -179,24 +322,24 @@ analyzeButton.addEventListener('click', () => {
             } // End response callback
         ); // End chrome.tabs.sendMessage (getText)
     }); // End chrome.tabs.query
-}); // End analyzeButton listener
+}
 
 // --- Function to send highlight request to content script ---
-function sendHighlightRequestToContentScript(flags, tabId) {
+function sendHighlightRequestToContentScript(flags, tabId, sens) {
     if (!tabId) { // If called just to clear highlights
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (tabs && tabs.length > 0 && tabs[0].id) {
-                chrome.tabs.sendMessage(tabs[0].id, { action: "highlightText", flags: flags });
+                chrome.tabs.sendMessage(tabs[0].id, { action: "highlightText", flags: flags, sens: sens });
             }
         });
     } else {
-        chrome.tabs.sendMessage(tabId, { action: "highlightText", flags: flags });
+        chrome.tabs.sendMessage(tabId, { action: "highlightText", flags: flags, sens: sens});
     }
 }
 
 // --- Progress Bar Display Function ---
 // *** RENAMED from displayChart and REIMPLEMENTED ***
-function displayScoreBar(score) {
+function displayScoreBar(score, domain_info) {
     // Ensure score is a number between 0 and 100
     const numericScore = Math.max(0, Math.min(100, Number(score)));
 
@@ -220,15 +363,22 @@ function displayScoreBar(score) {
     progressBarDiv.classList.remove('score-red', 'score-yellow', 'score-green');
     progressBarDiv.classList.add(colorClass);
 
-    // Optional: Add score text inside the bar if needed
-    // progressBarDiv.textContent = `${numericScore}%`;
+    if (!domain_info.isUnreliable && numericScore <= 50) {
+        chrome.runtime.sendMessage({
+            action: "logNewUnreliableDomain",
+            score: numericScore,
+            domain: domain_info.name
+        });
+    }
 }
 
 
 // --- Helper Functions ---
 function showLoading(isLoading) {
     loadingIndicator.style.display = isLoading ? 'block' : 'none';
-    analyzeButton.disabled = isLoading;
+    analyzeButtonL.disabled = isLoading;
+    analyzeButtonM.disabled = isLoading;
+    analyzeButtonD.disabled = isLoading;
 }
 
 function showError(message) {

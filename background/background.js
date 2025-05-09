@@ -1,18 +1,31 @@
 // background/background.js
 
-// --- Window Management (Keep if you reverted, remove if you kept the window popup) ---
-let popupWindowId = null;
-// ... (rest of window management code if applicable) ...
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'loading') {
+        chrome.storage.local.remove(`popupState_${tabId}`);
+    }
+});
+
+let supabase = null;
+
+async function initSupabase() {
+  const module = await import('./config/supabaseClient.js');
+  supabase = module.default;
+  console.log('Supabase initialized:', supabase);
+}
+
+// Call this only once (e.g. on startup)
+initSupabase();
 
 // Set of known unreliable domains (Curate this list carefully!)
-const unreliableDomains = new Set([
-    'infowars.com',
-    'breitbart.com',
-    'naturalnews.com',
-    'dailycaller.com',
-    'smninewschannel.com',
-    // Add more based on reputable sources and clear criteria
-]);
+// const unreliableDomains = new Set([
+//     'infowars.com',
+//     'breitbart.com',
+//     'naturalnews.com',
+//     'dailycaller.com',
+//     'smninewschannel.com',
+//     // Add more based on reputable sources and clear criteria
+// ]);
 
 // Listener for messages from popup or content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -26,44 +39,69 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ success: false, error: "API Key not set. Please set it in the popup." });
                 return true; // Exit early if no API key
             }
-
-            // Query for the active tab to get its URL for domain checking
-            // This is necessary because messages from the popup don't have sender.tab.url
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (chrome.runtime.lastError || !tabs || tabs.length === 0 || !tabs[0].url) {
-                    console.error("Error querying active tab or tab URL missing:", chrome.runtime.lastError?.message);
-                    // Proceed without domain check if tab query fails
-                    performAnalysis(request.text, apiKey, null, false, sendResponse);
-                    return;
-                }
-
-                const activeTabUrl = tabs[0].url;
-                let domain = null;
-                let isUnreliable = false;
-
-                try {
-                    const url = new URL(activeTabUrl);
-                    // Ensure it's an http/https URL before checking domain
-                    if (url.protocol === "http:" || url.protocol === "https:") {
-                        domain = url.hostname.replace(/^www\./, ''); // Remove 'www.'
-                        if (unreliableDomains.has(domain)) {
-                            isUnreliable = true;
-                            console.log(`Domain found in unreliable list: ${domain}`);
-                        }
-                    } else {
-                        console.log(`Skipping domain check for non-http(s) URL: ${activeTabUrl}`);
+    
+            chrome.windows.getCurrent({ populate: true }, (window) => {
+                // Query for the active tab to get its URL for domain checking
+                console.log("Querying active tab...");
+                chrome.tabs.query({ active: true, windowId: window.id }, (tabs) => {
+                    console.log("Tabs found:", tabs);
+                    if (chrome.runtime.lastError || !tabs || tabs.length === 0 || !tabs[0].url) {
+                        console.error("Error querying active tab or tab URL missing:", chrome.runtime.lastError?.message);
+                        // Proceed without domain check if tab query fails
+                        performAnalysis(request.text, apiKey, null, false, request.sens, sendResponse);
+                        return;
                     }
-                } catch (e) {
-                    console.error("Could not parse active tab URL:", activeTabUrl, e);
-                }
+        
+                    const activeTabUrl = tabs[0].url;
+                    let domain = null;
+                    let isUnreliable = false;
+        
+                    try {
+                        const url = new URL(activeTabUrl);
+                        // Ensure it's an http/https URL before checking domain
+                        if (url.protocol === "http:" || url.protocol === "https:") {
+                            domain = url.hostname.replace(/^www\./, ''); // Remove 'www.'
+                        } else {
+                            console.log(`Skipping domain check for non-http(s) URL: ${activeTabUrl}`);
+                        }
+                    } catch (e) {
+                        console.error("Could not parse active tab URL:", activeTabUrl, e);
+                    }
+                    // fetch the table unreliableDomain from supabase
+                    supabase
+                        .from('unreliable_domain')
+                        .select('domain_url, reliability')
+                        .then(({ data, error }) => {
+                            if (error) {
+                                console.error("Error fetching unreliable domains from Supabase:", error);
+                                // Proceed with analysis even if the domain check fails
+                                performAnalysis(request.text, apiKey, domain, false, request.sens, sendResponse);
+                                return;
+                            }
+                            console.log("Unreliable domains fetched from Supabase:", data);
+                            console.log("Domain to check:", domain);
+                            
+                            // Find matching domain entry
+                            const matchedEntry = data.find(item => item.domain_url === domain);
 
-                // Perform the analysis *after* getting the domain info
-                // Pass the determined domain and isUnreliable status to performAnalysis
-                performAnalysis(request.text, apiKey, domain, isUnreliable, sendResponse);
-            }); // End chrome.tabs.query
+                            if (matchedEntry) {
+                                console.log(`Domain found in unreliable list: ${domain}`);
+                                performAnalysis(request.text, apiKey, domain, true, request.sens, sendResponse, matchedEntry.reliability);
+                            } else {
+                                performAnalysis(request.text, apiKey, domain, false, request.sens, sendResponse);
+                            }
 
+                        })
+                        .catch((error) => {
+                            console.error("Error querying Supabase:", error);
+                            // Proceed with analysis even if there’s an issue fetching the domains
+                           performAnalysis(request.text, apiKey, domain, isUnreliable, request.sens, sendResponse);
+                        });
+                }); // End chrome.tabs.query
+            });
+            
         }); // End chrome.storage.local.get
-        return true; // Keep channel open for async response from tabs.query and fetch
+        return true; // Keep the channel open for async response from tabs.query and fetch
     }
     // *** Listener case for snippet verification *** (Keep this as it was before the last correction attempt)
     else if (request.action === "verifySnippet") {
@@ -84,13 +122,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 return true; // Still need to return true for async potential
             }
 
-            verifySnippetWithSources(request.snippet, request.reason, apiKey)
+            verifySnippetWithSources(request.snippet, request.reason, apiKey, request.sens)
                 .then(verificationData => {
                     console.log("[Background] Verification successful. Sending result to tab:", senderTabId, verificationData);
                     // Send the result specifically to the content script tab
                     chrome.tabs.sendMessage(senderTabId, {
                         action: "verificationResult",
                         success: true,
+                        sens: request.sens,
                         ...verificationData
                     });
                     // Send a simple success response back to the original caller (handleIconClick)
@@ -102,6 +141,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     chrome.tabs.sendMessage(senderTabId, {
                         action: "verificationResult",
                         success: false,
+                        sens: request.sens,
                         error: error.message || "Failed to fetch or process verification from Gemini"
                     });
                     // Send a simple failure response back to the original caller (handleIconClick)
@@ -110,29 +150,48 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true; // Keep channel open for async response
     }
+    else if (request.action === "logNewUnreliableDomain") {
+        handleLogUnreliableDomain(request).then(() => {
+            sendResponse({ success: true });
+        }).catch((error) => {
+            console.error("Error logging unreliable domain:", error);
+            sendResponse({ success: false, error: error.message });
+        });
+
+        // IMPORTANT: keep this true to allow async sendResponse
+        return true;
+    }
 }); // End chrome.runtime.onMessage.addListener
 
 
 // Helper function to contain the analysis logic after getting domain info
-function performAnalysis(textToAnalyze, apiKey, domain, isUnreliable, sendResponse) {
-    callGeminiAPIForHighlighting(textToAnalyze, apiKey)
+function performAnalysis(textToAnalyze, apiKey, domain, isUnreliable, sens, sendResponse, reliability = null) {
+    callGeminiAPIForHighlighting(textToAnalyze, apiKey, sens)
         .then(analysisData => {
             console.log("Gemini API Processed Response for Highlighting:", analysisData);
 
             // *** Modify response based on domain check ***
-            let finalScore = analysisData.score;
+            let finalScore = analysisData.score ?? 100;
             let flags = analysisData.flags || [];
 
-            if (isUnreliable) {
-                // Option 1: Drastically reduce score (Example: cap at 15)
-                // This is a policy decision - adjust as needed.
-                finalScore = Math.min(finalScore ?? 100, 15); // Use ?? 100 to handle undefined score
+            if (typeof reliability === 'number') {
+                if (reliability <= 5) {
+                    // Unreliable source — cap based on reliability
+                    const cap = 10 * reliability; // e.g., 3 → cap at 30
+                    finalScore = Math.min(finalScore, cap);
 
-                // Option 2: Add a specific flag (Example: add to beginning)
-                flags.unshift({
-                    snippet: `Website Domain (${domain})`,
-                    reason: "This domain is on a list of sources frequently associated with unreliable information."
-                });
+                    flags.unshift({
+                        snippet: `Website Domain (${domain})`,
+                        reason: `This domain is marked unreliable with a reliability score of ${reliability}/10. Lower reliability reduces the maximum trust score.`
+                    });
+                } else if (reliability === 10) {
+                    // Trusted source — floor at 75
+                    finalScore = Math.max(finalScore, 85);
+                } else {
+                    // Medium reliability — cap between 75 and 90
+                    const cap = 60 + (reliability * 3); // e.g., 6 → 78, 9 → 87
+                    finalScore = Math.min(finalScore, cap);
+                }
             }
 
             // *** Send score, flags, AND domain status ***
@@ -142,7 +201,8 @@ function performAnalysis(textToAnalyze, apiKey, domain, isUnreliable, sendRespon
                 flags: flags,      // Send potentially modified flags
                 domainInfo: {      // Add domain info to the response
                     name: domain,
-                    isUnreliable: isUnreliable
+                    isUnreliable: isUnreliable,
+                    reliability: reliability
                 }
             });
         })
@@ -157,39 +217,83 @@ console.log("Background script loaded (v5 - Verification Added).");
 
 
 // *** Function for initial text analysis and highlighting flags ***
-async function callGeminiAPIForHighlighting(textToAnalyze, apiKey) {
+async function callGeminiAPIForHighlighting(textToAnalyze, apiKey, sens) {
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
     // --- Prompt Engineering for Highlighting ---
     // ** CRITICAL STEP **
     // Ask for a score AND specific snippets with reasons in JSON format.
     // This prompt attempts to get structured output. It might need refinement.
-    const prompt = `Analyze the following text for potential signs of misinformation, bias, or manipulative language.
+    const promptLight = `You are a fact-checking assistant. Your task is to analyze the following text and identify statements that may qualify as **fake news** or **claims lacking evidence**.
 
-Provide your analysis in JSON format with two main keys: "score" and "flags".
+Ignore any signs of bias, emotional tone, or persuasive language **unless** they are directly linked to a factually incorrect or unsubstantiated claim.
+
+Return your analysis in **valid JSON format** with two keys: "score" and "flags".
 1. 	"score": A numerical credibility score between 0 (very low credibility) and 100 (very high credibility).
 2. 	"flags": An array of objects. Each object should represent a specific problematic text snippet and have two keys:
-    - "snippet": The exact text snippet (maximum 2 sentences) that contains potential issues.
-    - "reason": A brief explanation (1 sentence) of why this snippet is flagged (e.g., "Uses emotionally charged language", "Lacks supporting evidence", "Potential logical fallacy").
+    - "snippet": The exact text snippet (maximum 2 sentences) of the problematic claim.
+    - "reason": A short explanation (1 sentence) explaining why this claim appears false or unsupported (e.g., "Claim is widely debunked", "No supporting evidence provided").
 
 Example JSON output format:
 \`\`\`json
 {
-    "score": 45,
+    "score": 42,
     "flags": [
         {
-            "snippet": "This outrageous policy will bankrupt the nation overnight!",
-            "reason": "Uses highly sensational and exaggerated language without evidence."
+            "snippet": "The COVID-19 vaccine implants microchips into people.",
+            "reason": "This claim has been widely debunked by multiple health organizations."
         },
         {
-            "snippet": "Everyone agrees that this is the only solution.",
-            "reason": "Makes a broad generalization ('Everyone agrees') that is likely untrue."
+            "snippet": "Experts say the earth might be flat after all.",
+            "reason": "Scientific consensus strongly supports a spherical Earth; this claim lacks evidence."
         }
     ]
 }
 \`\`\`
 
-If no specific issues are found, return an empty "flags" array. Ensure the entire output is valid JSON.
+If no fake or unsupported claims are found, return an empty "flags" array.
+
+Text to analyze:
+---
+${textToAnalyze}
+---
+
+JSON Analysis:`;
+
+const promptMedium = `You are an AI assistant tasked with evaluating a text for potential misinformation and signs of bias or manipulation. 
+
+Your analysis should identify:
+1. **Fake or unsubstantiated claims** (e.g., statements presented as facts without evidence).
+2. **Biased or emotionally manipulative language** (e.g., overly strong wording, logical fallacies, emotionally charged phrases, or broad generalizations that influence opinion rather than inform).
+
+Return the results in **valid JSON format** with two keys:
+1. "score": A number from 0 (very unreliable/manipulative) to 100 (very reliable and neutral), based on the overall credibility and tone of the text.
+2. "flags": An array of flagged text snippets. Each item should include:
+   - "snippet": A short excerpt (max 2 sentences) of the problematic text.
+   - "reason": A short explanation of why it was flagged (e.g., "Lacks supporting evidence", "Uses emotionally charged language", "Presents opinion as fact").
+
+Example JSON output:
+\`\`\`json
+{
+    "score": 58,
+    "flags": [
+    {
+        "snippet": "This disastrous policy will destroy the economy overnight!",
+        "reason": "Uses emotionally charged and alarmist language without supporting evidence."
+    },
+    {
+        "snippet": "Everyone agrees this is the only solution.",
+        "reason": "Makes a broad generalization likely untrue and manipulative."
+    },
+    {
+        "snippet": "Studies show vaccines cause autism.",
+        "reason": "This claim has been widely debunked and lacks credible evidence."
+    }
+    ]
+}
+\`\`\`
+
+If no issues are found, return an empty "flags" array.
 
 Text to analyze:
 ---
@@ -198,6 +302,14 @@ ${textToAnalyze}
 
 JSON Analysis:`;
     // --- End Prompt Engineering ---
+
+    let prompt = "";
+
+    if (sens == 'light') {
+        prompt = promptLight;
+    } else {
+        prompt = promptMedium;
+    } 
 
     console.log("Sending text to Gemini API for highlighting analysis...");
 
@@ -282,18 +394,31 @@ JSON Analysis:`;
 
 
 // *** NEW: Function to verify a snippet and get sources ***
-async function verifySnippetWithSources(snippet, reason, apiKey) {
+async function verifySnippetWithSources(snippet, reason, apiKey, sens) {
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
-    // --- Prompt Engineering for Verification ---
-    // Ask for explanation and credible sources in JSON format.
-    const prompt = `A piece of text was flagged with the following snippet and reason:
+    // --- Prompt Engineering based on sensitivity ---
+    let prompt = "";
+    if (sens === "deep") {
+        console.log("sens is deep", sens);
+        prompt = `A piece of text was flagged with the following snippet and reason:
 Snippet: "${snippet}"
 Reason: "${reason}"
 
 Please perform the following tasks based *only* on the provided snippet and reason:
-1. 	**Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic given the reason. Focus on explaining the reasoning itself.
-2. 	**Find Sources:** Search the web for 3 highly credible and relevant sources (e.g., reputable news organizations, academic institutions, established fact-checking sites) that provide context or evidence related to the explanation. Avoid opinion blogs or unreliable sources.
+
+1. **Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic, focusing on the reasoning behind the concern. Explain how the snippet could be misleading, unsubstantiated, or problematic according to the reason provided.
+    
+2. **Find Sources:** Search the web for **3 highly credible and relevant sources** that provide context, evidence, or fact-based information related to the explanation. Use reputable sources such as:
+    - Reputable news organizations (e.g., BBC, New York Times)
+    - Academic institutions (e.g., universities or research papers)
+    - Established fact-checking sites (e.g., Snopes, FactCheck.org)
+
+    **Important guidelines for finding sources:**
+    - Avoid unreliable sources such as opinion blogs or sites with questionable credibility.
+    - Make sure the sources are directly related to the explanation and provide factual support.
+    
+    If you cannot find 3 credible sources, provide as many as you can and leave the rest as empty strings (""). If you can't provide any credible sources, return empty strings for all sources.
 
 Provide your response strictly in the following JSON format:
 \`\`\`json
@@ -307,9 +432,40 @@ Provide your response strictly in the following JSON format:
 }
 \`\`\`
 
-If you cannot find 3 credible sources, provide as many as you can find (minimum 1 if possible) and leave the remaining entries as empty strings (""). If you cannot provide a meaningful explanation or find any sources, return an empty summary and an empty sources array. Ensure the entire output is valid JSON.
+If no sources are found, return empty strings as follows:
+\`\`\`json
+{
+    "summary": "Your explanation here.",
+    "sources": [
+        "",
+        "",
+        ""
+    ]
+}
+\`\`\`
 
 JSON Verification:`;
+    } else {
+        console.log(sens);
+        // Light or Medium scan
+        prompt = `A piece of text was flagged with the following snippet and reason:
+Snippet: "${snippet}"
+Reason: "${reason}"
+
+Please explain in 2-3 sentences why this snippet might be considered problematic based on the reason provided. Focus on a clear, unbiased explanation. Do not search the web or include any sources.
+
+Return the response in the following JSON format:
+\`\`\`json
+{
+    "summary": "Your explanation here.",
+    "sources": []
+}
+\`\`\`
+
+If no meaningful explanation can be provided, return an empty summary and an empty array for sources. Ensure valid JSON output.
+
+JSON Verification:`;
+    }
     // --- End Prompt Engineering ---
 
     console.log(`Sending snippet to Gemini API for verification: "${snippet.substring(0, 50)}..."`);
@@ -367,7 +523,10 @@ JSON Verification:`;
                 console.log("Extracted Summary:", summary);
                 console.log("Extracted Sources:", sources);
 
-                return { summary, sources };
+                return {
+                    summary,
+                    sources
+                };
 
             } catch (parseError) {
                 console.error("Failed to parse verification JSON response from Gemini:", parseError);
@@ -386,5 +545,51 @@ JSON Verification:`;
     } catch (error) {
         console.error("Verification fetch or processing error:", error);
         throw error; // Re-throw
+    }
+}
+
+async function handleLogUnreliableDomain(request) {
+    const domain = request.domain;
+    const score = request.score;
+
+    const { data, error } = await supabase
+        .from('scores')
+        .select('increment, score_average')
+        .eq('domain_url', domain)
+        .single();
+
+    if (error && error.code !== 'PGRST116') {
+        throw error;
+    }
+
+    if (!data) {
+        await supabase.from('scores').insert({
+            domain_url: domain,
+            increment: 1,
+            score_average: score
+        });
+    } else {
+        const { increment, score_average } = data;
+
+        if (increment >= 10) {
+            const reliability = Math.max(1, Math.ceil(score_average / 20));
+
+            await supabase
+                .from('unreliable_domain')
+                .upsert({ domain_url: domain, reliability });
+
+            return;
+        }
+
+        const newIncrement = increment + 1;
+        const newAverage = ((score_average * increment) + score) / newIncrement;
+
+        await supabase
+            .from('scores')
+            .update({
+                increment: newIncrement,
+                score_average: newAverage
+            })
+            .eq('domain_url', domain);
     }
 }
