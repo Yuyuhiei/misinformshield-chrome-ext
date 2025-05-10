@@ -1,7 +1,9 @@
 // background/background.js
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    // Clear popup state when a tab starts loading a new page or is reloaded
     if (changeInfo.status === 'loading') {
+        console.log(`Tab ${tabId} is loading, clearing its popup state.`);
         chrome.storage.local.remove(`popupState_${tabId}`);
     }
 });
@@ -9,23 +11,25 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 let supabase = null;
 
 async function initSupabase() {
-  const module = await import('./config/supabaseClient.js');
-  supabase = module.default;
-  console.log('Supabase initialized:', supabase);
+  try {
+    // Ensure the path to supabaseClient.js is correct relative to dist/background.js
+    // If supabaseClient.js is in dist/config/supabaseClient.js, then './config/supabaseClient.js' is correct.
+    const module = await import('./config/supabaseClient.js');
+    supabase = module.default;
+    if (supabase) {
+        console.log('Supabase initialized successfully.');
+    } else {
+        console.error('Supabase client was not properly initialized from supabaseClient.js. Check for errors there.');
+    }
+  } catch (error) {
+    console.error('Failed to initialize Supabase:', error);
+    supabase = null; // Ensure supabase is null if initialization fails
+  }
 }
 
 // Call this only once (e.g. on startup)
 initSupabase();
 
-// Set of known unreliable domains (Curate this list carefully!)
-// const unreliableDomains = new Set([
-//     'infowars.com',
-//     'breitbart.com',
-//     'naturalnews.com',
-//     'dailycaller.com',
-//     'smninewschannel.com',
-//     // Add more based on reputable sources and clear criteria
-// ]);
 
 // Listener for messages from popup or content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -37,51 +41,58 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!apiKey) {
                 console.error("Gemini API Key not found in storage.");
                 sendResponse({ success: false, error: "API Key not set. Please set it in the popup." });
-                return true; // Exit early if no API key
+                return; // No need for 'return true' here as sendResponse is synchronous
+            }
+            
+            // Check if Supabase is ready before proceeding with operations that need it
+            if (!supabase) {
+                console.error("Supabase client not initialized. Cannot perform domain check for analyzeText.");
+                // Decide if you want to proceed without domain check or send an error
+                // Option 1: Proceed without domain check
+                // performAnalysis(request.text, apiKey, null, false, request.sens, sendResponse);
+                // Option 2: Send an error
+                sendResponse({ success: false, error: "Database connection not ready. Please try again shortly." });
+                return; // No need for 'return true' here
             }
     
             chrome.windows.getCurrent({ populate: true }, (window) => {
-                // Query for the active tab to get its URL for domain checking
-                console.log("Querying active tab...");
+                if (chrome.runtime.lastError) {
+                    console.error("Error getting current window:", chrome.runtime.lastError.message);
+                    performAnalysis(request.text, apiKey, null, false, request.sens, sendResponse); // Proceed without domain check
+                    return;
+                }
                 chrome.tabs.query({ active: true, windowId: window.id }, (tabs) => {
-                    console.log("Tabs found:", tabs);
                     if (chrome.runtime.lastError || !tabs || tabs.length === 0 || !tabs[0].url) {
                         console.error("Error querying active tab or tab URL missing:", chrome.runtime.lastError?.message);
-                        // Proceed without domain check if tab query fails
-                        performAnalysis(request.text, apiKey, null, false, request.sens, sendResponse);
+                        performAnalysis(request.text, apiKey, null, false, request.sens, sendResponse); // Proceed without domain check
                         return;
                     }
         
                     const activeTabUrl = tabs[0].url;
                     let domain = null;
-                    let isUnreliable = false;
         
                     try {
                         const url = new URL(activeTabUrl);
-                        // Ensure it's an http/https URL before checking domain
                         if (url.protocol === "http:" || url.protocol === "https:") {
-                            domain = url.hostname.replace(/^www\./, ''); // Remove 'www.'
+                            domain = url.hostname.replace(/^www\./, '');
                         } else {
                             console.log(`Skipping domain check for non-http(s) URL: ${activeTabUrl}`);
                         }
                     } catch (e) {
                         console.error("Could not parse active tab URL:", activeTabUrl, e);
                     }
-                    // fetch the table unreliableDomain from supabase
+                    
+                    // Fetch unreliable domains from Supabase
                     supabase
                         .from('unreliable_domain')
                         .select('domain_url, reliability')
                         .then(({ data, error }) => {
                             if (error) {
                                 console.error("Error fetching unreliable domains from Supabase:", error);
-                                // Proceed with analysis even if the domain check fails
-                                performAnalysis(request.text, apiKey, domain, false, request.sens, sendResponse);
+                                performAnalysis(request.text, apiKey, domain, false, request.sens, sendResponse); // Proceed but indicate domain check failed
                                 return;
                             }
                             console.log("Unreliable domains fetched from Supabase:", data);
-                            console.log("Domain to check:", domain);
-                            
-                            // Find matching domain entry
                             const matchedEntry = data.find(item => item.domain_url === domain);
 
                             if (matchedEntry) {
@@ -90,119 +101,159 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             } else {
                                 performAnalysis(request.text, apiKey, domain, false, request.sens, sendResponse);
                             }
-
                         })
-                        .catch((error) => {
-                            console.error("Error querying Supabase:", error);
-                            // Proceed with analysis even if there’s an issue fetching the domains
-                           performAnalysis(request.text, apiKey, domain, isUnreliable, request.sens, sendResponse);
+                        .catch((dbError) => {
+                            console.error("Error querying Supabase for unreliable domains:", dbError);
+                            performAnalysis(request.text, apiKey, domain, false, request.sens, sendResponse); // Proceed, domain check failed
                         });
-                }); // End chrome.tabs.query
+                }); 
             });
-            
-        }); // End chrome.storage.local.get
-        return true; // Keep the channel open for async response from tabs.query and fetch
+        });
+        return true; // Crucial: Keep the channel open for async response
     }
-    // *** Listener case for snippet verification *** (Keep this as it was before the last correction attempt)
     else if (request.action === "verifySnippet") {
         chrome.storage.local.get(['geminiApiKey'], (result) => {
             const apiKey = result.geminiApiKey;
             if (!apiKey) {
                 console.error("Gemini API Key not found for verification.");
                 sendResponse({ success: false, error: "API Key not set." });
-                return true;
+                return; // Synchronous response
             }
 
             console.log(`[Background] Received verifySnippet for: "${request.snippet.substring(0, 50)}..."`);
-            // Get the tab ID from the sender
             const senderTabId = sender.tab?.id;
             if (!senderTabId) {
                 console.error("[Background] Could not get sender tab ID for verification result.");
                 sendResponse({ success: false, error: "Internal error: Missing sender tab ID." });
-                return true; // Still need to return true for async potential
+                return; // Synchronous response
             }
 
             verifySnippetWithSources(request.snippet, request.reason, apiKey, request.sens)
                 .then(verificationData => {
                     console.log("[Background] Verification successful. Sending result to tab:", senderTabId, verificationData);
-                    // Send the result specifically to the content script tab
                     chrome.tabs.sendMessage(senderTabId, {
                         action: "verificationResult",
                         success: true,
                         sens: request.sens,
                         ...verificationData
+                    }, () => { // Add callback for sendMessage to content script
+                        if (chrome.runtime.lastError) {
+                            console.error("Error sending verificationResult to content script:", chrome.runtime.lastError.message);
+                        }
                     });
-                    // Send a simple success response back to the original caller (handleIconClick)
-                    sendResponse({ success: true });
+                    sendResponse({ success: true }); // Respond to original popup message
                 })
                 .catch(error => {
                     console.error("[Background] Verification failed. Sending error result to tab:", senderTabId, error);
-                    // Send the error specifically to the content script tab
                     chrome.tabs.sendMessage(senderTabId, {
                         action: "verificationResult",
                         success: false,
                         sens: request.sens,
                         error: error.message || "Failed to fetch or process verification from Gemini"
+                    }, () => { // Add callback
+                        if (chrome.runtime.lastError) {
+                            console.error("Error sending error verificationResult to content script:", chrome.runtime.lastError.message);
+                        }
                     });
-                    // Send a simple failure response back to the original caller (handleIconClick)
-                    sendResponse({ success: false, error: error.message || "Verification process failed." });
+                    sendResponse({ success: false, error: error.message || "Verification process failed." }); // Respond to original popup message
                 });
         });
-        return true; // Keep channel open for async response
+        return true; // Crucial: Keep channel open
     }
     else if (request.action === "logNewUnreliableDomain") {
+        if (!supabase) {
+            console.error("Supabase client not initialized. Cannot log unreliable domain.");
+            sendResponse({ success: false, error: "Database connection not ready." });
+            return false; // Synchronous response as we are not proceeding
+        }
         handleLogUnreliableDomain(request).then(() => {
             sendResponse({ success: true });
         }).catch((error) => {
             console.error("Error logging unreliable domain:", error);
             sendResponse({ success: false, error: error.message });
         });
-
-        // IMPORTANT: keep this true to allow async sendResponse
-        return true;
+        return true; // Crucial: Keep channel open
     }
-}); // End chrome.runtime.onMessage.addListener
+    else if (request.action === "getUnreliableDomains") {
+        if (!supabase) { 
+            console.error("Supabase client not initialized in background script.");
+            sendResponse({ success: false, error: "Database connection not ready." });
+            return false; 
+        }
+        
+        console.log("Background: Received request to get unreliable domains.");
+        (async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('unreliable_domain') 
+                    .select('domain_id, domain_url, reliability, reason')
+                    .order('domain_url', { ascending: true });
+
+                if (error) {
+                    console.error("Error fetching unreliable domains from Supabase:", error);
+                    sendResponse({ success: false, error: error.message || "Failed to fetch domains from database." });
+                } else {
+                    console.log("Background: Successfully fetched unreliable domains:", data);
+                    sendResponse({ success: true, data: data });
+                }
+            } catch (e) {
+                console.error("Exception while fetching unreliable domains:", e);
+                sendResponse({ success: false, error: e.message || "An unexpected error occurred while fetching domains." });
+            }
+        })();
+        return true; // Crucial: Keep channel open
+    }
+    // Add a default case or return false if no action matches and no async response is pending
+    // else {
+    //     console.warn("Unknown action received in background script:", request.action);
+    //     return false; // No response will be sent
+    // }
+});
 
 
-// Helper function to contain the analysis logic after getting domain info
-function performAnalysis(textToAnalyze, apiKey, domain, isUnreliable, sens, sendResponse, reliability = null) {
+// Helper function to contain the analysis logic
+function performAnalysis(textToAnalyze, apiKey, domain, isMarkedUnreliable, sens, sendResponse, reliabilityScore = null) {
     callGeminiAPIForHighlighting(textToAnalyze, apiKey, sens)
         .then(analysisData => {
             console.log("Gemini API Processed Response for Highlighting:", analysisData);
 
-            // *** Modify response based on domain check ***
-            let finalScore = analysisData.score ?? 100;
+            let finalScore = analysisData.score ?? 100; // Default to 100 if score is null/undefined
             let flags = analysisData.flags || [];
 
-            if (typeof reliability === 'number') {
-                if (reliability <= 5) {
-                    // Unreliable source — cap based on reliability
-                    const cap = 10 * reliability; // e.g., 3 → cap at 30
+            // Adjust score based on domain reliability if a score was provided
+            if (typeof reliabilityScore === 'number') {
+                if (reliabilityScore <= 5) {
+                    const cap = 10 * reliabilityScore; 
                     finalScore = Math.min(finalScore, cap);
-
+                    // Add a flag indicating the domain's low reliability impacted the score
                     flags.unshift({
-                        snippet: `Website Domain (${domain})`,
-                        reason: `This domain is marked unreliable with a reliability score of ${reliability}/10. Lower reliability reduces the maximum trust score.`
+                        snippet: `Website Domain (${domain || 'Current Page'})`,
+                        reason: `This domain is listed with a low reliability score of ${reliabilityScore}/10, which has capped the overall credibility assessment.`
                     });
-                } else if (reliability === 10) {
-                    // Trusted source — floor at 75
-                    finalScore = Math.max(finalScore, 85);
-                } else {
-                    // Medium reliability — cap between 75 and 90
-                    const cap = 60 + (reliability * 3); // e.g., 6 → 78, 9 → 87
+                } else if (reliabilityScore === 10) { // Mark for very high reliability
+                    finalScore = Math.max(finalScore, 85); // Ensure score is at least 85 for trusted sources
+                } else { // For medium reliability (6-9)
+                    const cap = 60 + (reliabilityScore * 3); // e.g. 6 -> 78, 9 -> 87
                     finalScore = Math.min(finalScore, cap);
                 }
+            } else if (domain && isMarkedUnreliable && reliabilityScore === null) {
+                // This case might occur if the domain was found in 'unreliable_domain' but reliability score wasn't passed correctly.
+                // For safety, treat as low reliability if marked unreliable but no score.
+                finalScore = Math.min(finalScore, 40); // Example cap
+                 flags.unshift({
+                        snippet: `Website Domain (${domain || 'Current Page'})`,
+                        reason: `This domain is listed as potentially unreliable. This has impacted the credibility assessment.`
+                    });
             }
 
-            // *** Send score, flags, AND domain status ***
             sendResponse({
                 success: true,
-                score: finalScore, // Send potentially modified score
-                flags: flags,      // Send potentially modified flags
-                domainInfo: {      // Add domain info to the response
+                score: finalScore,
+                flags: flags,
+                domainInfo: {
                     name: domain,
-                    isUnreliable: isUnreliable,
-                    reliability: reliability
+                    isUnreliable: isMarkedUnreliable, // This might be true even if reliabilityScore is from a different table
+                    reliability: reliabilityScore // This is the specific score from 'unreliable_domain'
                 }
             });
         })
@@ -210,15 +261,12 @@ function performAnalysis(textToAnalyze, apiKey, domain, isUnreliable, sens, send
             console.error("Error calling/processing Gemini API for highlighting:", error);
             sendResponse({ success: false, error: error.message || "Failed to fetch or process analysis from Gemini" });
         });
-} // End performAnalysis function
+}
 
 
-console.log("Background script loaded (v5 - Verification Added).");
-
-
-// *** Function for initial text analysis and highlighting flags ***
+// --- Gemini API Call for Highlighting ---
 async function callGeminiAPIForHighlighting(textToAnalyze, apiKey, sens) {
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
     // --- Prompt Engineering for Highlighting ---
     // ** CRITICAL STEP **
@@ -252,6 +300,12 @@ Example JSON output format:
 \`\`\`
 
 If no fake or unsupported claims are found, return an empty "flags" array.
+
+Return only a compact JSON object like this:
+
+{"score": 35, "flags":[{"snippet":"...", "reason":"..."}, ...]}
+
+Do NOT wrap it in markdown or add extra text. Avoid line breaks if needed. Response must be valid JSON within token limits.
 
 Text to analyze:
 ---
@@ -293,7 +347,13 @@ Example JSON output:
 }
 \`\`\`
 
-If no issues are found, return an empty "flags" array.
+If no issues are found, return an empty "flags" array. 
+
+Return only a compact JSON object like this:
+
+{"score": 35, "flags":[{"snippet":"...", "reason":"..."}, ...]}
+
+Do NOT wrap it in markdown or add extra text. Avoid line breaks if needed. Response must be valid JSON within token limits.
 
 Text to analyze:
 ---
@@ -354,27 +414,20 @@ JSON Analysis:`;
              }
 
              try {
-                 const analysisData = JSON.parse(jsonString);
-                 console.log("Successfully parsed analysis JSON from Gemini.");
-
-                 // Validate the structure
-                 const score = (analysisData && typeof analysisData.score === 'number')
-                     ? Math.max(0, Math.min(100, analysisData.score))
-                     : 50; // Default score if missing/invalid
-                 const flags = (analysisData && Array.isArray(analysisData.flags))
-                     ? analysisData.flags.filter(f => f && typeof f.snippet === 'string' && typeof f.reason === 'string') // Basic validation
-                     : []; // Default to empty array
-
-                 console.log("Extracted Score:", score);
-                 console.log("Extracted Flags:", flags);
-
-                 return { score, flags }; // Return the parsed object
-
-             } catch (parseError) {
-                 console.error("Failed to parse JSON response from Gemini:", parseError);
-                 console.error("Received text:", jsonString); // Log what was received
-                 throw new Error("Failed to parse analysis JSON from API response.");
-             }
+                const analysisData = tryRepairJson(jsonString);
+                console.log("Successfully parsed or repaired analysis JSON.");
+            
+                const score = analysisData.score;
+                const flags = analysisData.flags;
+            
+                console.log("Extracted Score:", score);
+                console.log("Extracted Flags:", flags);
+                return { score, flags };
+            
+            } catch (parseError) {
+                console.error("Failed to parse or repair JSON:", parseError);
+                throw new Error("Invalid JSON from Gemini API and repair failed.");
+            }
 
         } else if (data.promptFeedback && data.promptFeedback.blockReason) {
             // Handle blocked prompts
@@ -392,10 +445,46 @@ JSON Analysis:`;
     }
 }
 
+function tryRepairJson(jsonString) {
+    // Step 1: Try parsing raw JSON first
+    try {
+        return JSON.parse(jsonString);
+    } catch (_) {
+        // Step 2: Fallback to repair
+        console.warn("Initial JSON parsing failed. Attempting repair...");
 
-// *** NEW: Function to verify a snippet and get sources ***
+        // Try to extract everything before the last complete object
+        const flagsStart = jsonString.indexOf('"flags": [');
+        if (flagsStart === -1) throw new Error("Missing 'flags' array in JSON.");
+
+        const flagsPart = jsonString.slice(flagsStart + 9); // Skip past `"flags": [`
+        const splitFlags = flagsPart.split('{').slice(1); // Split into flag entries (omit first empty part)
+
+        const repairedFlags = [];
+        for (const part of splitFlags) {
+            const maybeObject = `{${part}`;
+            try {
+                const fixed = maybeObject.replace(/,\s*}$/, '}'); // Remove trailing comma if any
+                repairedFlags.push(JSON.parse(fixed));
+            } catch {
+                break; // Stop at first incomplete/corrupt object
+            }
+        }
+
+        const scoreMatch = jsonString.match(/"score"\s*:\s*(\d+)/);
+        const score = scoreMatch ? Math.max(0, Math.min(100, parseInt(scoreMatch[1], 10))) : 50;
+
+        return {
+            score,
+            flags: repairedFlags
+        };
+    }
+}
+
+// --- Gemini API Call for Snippet Verification ---
 async function verifySnippetWithSources(snippet, reason, apiKey, sens) {
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const SERPAPI_URL = 'https://serpapi.com/search.json';
 
     // --- Prompt Engineering based on sensitivity ---
     let prompt = "";
@@ -405,34 +494,19 @@ async function verifySnippetWithSources(snippet, reason, apiKey, sens) {
 Snippet: "${snippet}"
 Reason: "${reason}"
 
-Please perform the following tasks based *only* on the provided snippet and reason:
+Please do the following:
+1. Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic, focusing on how it could be misleading, unsubstantiated, or concerning given the reason.
+2. Create a concise search query (under 20 words) that could help find supporting or contradicting *credible sources* (e.g., news articles, official reports) for the claims or ideas in the snippet.
 
-1. **Explain:** Briefly elaborate (2-3 sentences) on *why* the snippet might be considered problematic, focusing on the reasoning behind the concern. Explain how the snippet could be misleading, unsubstantiated, or problematic according to the reason provided.
-    
-2. **Find Sources:** Search the web for **3 highly credible and relevant sources** that provide context, evidence, or fact-based information related to the explanation. Use reputable sources such as:
-    - Reputable news organizations (e.g., BBC, New York Times)
-    - Academic institutions (e.g., universities or research papers)
-    - Established fact-checking sites (e.g., Snopes, FactCheck.org)
-
-    **Important guidelines for finding sources:**
-    - Avoid unreliable sources such as opinion blogs or sites with questionable credibility.
-    - Make sure the sources are directly related to the explanation and provide factual support.
-    
-    If you cannot find 3 credible sources, provide as many as you can and leave the rest as empty strings (""). If you can't provide any credible sources, return empty strings for all sources.
-
-Provide your response strictly in the following JSON format:
+Respond strictly in this JSON format:
 \`\`\`json
 {
-    "summary": "Your 2-3 sentence explanation here.",
-    "sources": [
-        "URL of source 1",
-        "URL of source 2",
-        "URL of source 3"
-    ]
+  "summary": "Your 2-3 sentence explanation here."
+  "search_query": "A focused Google search query for finding credible sources."
 }
 \`\`\`
 
-If you cannot find 3 credible sources, provide as many as you can find (minimum 1 if possible) and leave the remaining entries as empty strings (""). If you cannot provide a meaningful explanation or find any sources, return an empty summary and an empty sources array. Ensure the entire output is valid JSON.
+Return only valid JSON.
 
 JSON Verification:`;
     } else {
@@ -442,17 +516,16 @@ JSON Verification:`;
 Snippet: "${snippet}"
 Reason: "${reason}"
 
-Please explain in 2-3 sentences why this snippet might be considered problematic based on the reason provided. Focus on a clear, unbiased explanation. Do not search the web or include any sources.
+Please explain in 2-3 sentences why this snippet might be considered problematic based on the reason provided. Focus on a clear, unbiased explanation.
 
 Return the response in the following JSON format:
 \`\`\`json
 {
     "summary": "Your explanation here.",
-    "sources": []
 }
 \`\`\`
 
-If no meaningful explanation can be provided, return an empty summary and an empty array for sources. Ensure valid JSON output.
+If no meaningful explanation can be provided, return an empty summary. Ensure valid JSON output.
 
 JSON Verification:`;
     }
@@ -506,9 +579,38 @@ JSON Verification:`;
                 const summary = (verificationData && typeof verificationData.summary === 'string')
                     ? verificationData.summary.trim()
                     : "Could not generate explanation.";
-                const sources = (verificationData && Array.isArray(verificationData.sources))
-                    ? verificationData.sources.filter(s => typeof s === 'string' && s.trim().startsWith('http')) // Ensure they are strings and look like URLs
-                    : [];
+                
+                const searchQuery = (verificationData && typeof verificationData.search_query === 'string')
+                    ? verificationData.search_query.trim()
+                    : null;
+
+                let sources = [];
+                let serpApiKey = 'f07c21bcf1e4c3b1e93afd4230ebe0a3a9193394c0a4762db6822ca165017c8a';
+
+                if (sens === 'deep') {
+                    // --- SerpAPI Integration ---
+                    if (!searchQuery) {
+                        throw new Error("No valid search query generated from Gemini.");
+                    }
+                    const serpResponse = await fetch(
+                        `${SERPAPI_URL}?q=${encodeURIComponent(searchQuery)}&api_key=${serpApiKey}`
+                    );
+                    if (!serpResponse.ok) {
+                        console.error('SerpAPI request failed:', await serpResponse.text());
+                        throw new Error('Failed to fetch supporting sources from SerpAPI.');
+                    }
+                    const serpData = await serpResponse.json();
+                    const organicResults = serpData.organic_results || [];
+                    sources = organicResults
+                        .filter((result) => result.link && typeof result.link === 'string')
+                        .slice(0, 3)
+                        .map((result) => result.link);
+
+                    // Pad with empty strings if less than 3 sources
+                    while (sources.length < 3) {
+                        sources.push('');
+                    }
+                }
 
                 console.log("Extracted Summary:", summary);
                 console.log("Extracted Sources:", sources);
@@ -538,48 +640,70 @@ JSON Verification:`;
     }
 }
 
+// --- Database Interaction for Unreliable Domains ---
 async function handleLogUnreliableDomain(request) {
     const domain = request.domain;
     const score = request.score;
 
-    const { data, error } = await supabase
-        .from('scores')
-        .select('increment, score_average')
-        .eq('domain_url', domain)
-        .single();
-
-    if (error && error.code !== 'PGRST116') {
-        throw error;
+    if (!supabase) {
+        console.error("Supabase not initialized, cannot log domain score.");
+        throw new Error("Database connection not ready."); // This will be caught by the caller
     }
 
-    if (!data) {
-        await supabase.from('scores').insert({
-            domain_url: domain,
-            increment: 1,
-            score_average: score
-        });
-    } else {
-        const { increment, score_average } = data;
+    try {
+        const { data, error: selectError } = await supabase
+            .from('scores')
+            .select('increment, score_average')
+            .eq('domain_url', domain)
+            .single();
 
-        if (increment >= 10) {
-            const reliability = Math.max(1, Math.ceil(score_average / 20));
-
-            await supabase
-                .from('unreliable_domain')
-                .upsert({ domain_url: domain, reliability });
-
-            return;
+        if (selectError && selectError.code !== 'PGRST116') { // PGRST116: "Single row not found"
+            console.error("Error selecting from scores table:", selectError);
+            throw selectError;
         }
 
-        const newIncrement = increment + 1;
-        const newAverage = ((score_average * increment) + score) / newIncrement;
+        if (!data) { // Domain not in scores table yet
+            const { error: insertError } = await supabase.from('scores').insert({
+                domain_url: domain,
+                increment: 1,
+                score_average: score
+            });
+            if (insertError) { console.error("Error inserting into scores table:", insertError); throw insertError; }
+        } else { // Domain already in scores table
+            const { increment, score_average } = data;
+            const newIncrement = increment + 1; // Always increment
 
-        await supabase
-            .from('scores')
-            .update({
-                increment: newIncrement,
-                score_average: newAverage
-            })
-            .eq('domain_url', domain);
+            if (newIncrement >= 10) { // Check if it REACHES 10 with this increment
+                const finalAverage = ((score_average * increment) + score) / newIncrement;
+                const reliability = Math.max(1, Math.min(10, Math.round(finalAverage / 10))); // Scale 0-100 to 1-10
+
+                console.log(`Domain ${domain} reached ${newIncrement} reports. Avg score: ${finalAverage.toFixed(2)}. Calculated reliability: ${reliability}`);
+                
+                const { error: upsertError } = await supabase
+                    .from('unreliable_domain')
+                    .upsert({ domain_url: domain, reliability: reliability, reason: `Automatically flagged after ${newIncrement} reports with an average low score.` }, { onConflict: 'domain_url' });
+                if (upsertError) { console.error("Error upserting into unreliable_domain table:", upsertError); throw upsertError; }
+                
+                // Optionally, reset or remove from 'scores' table after promotion
+                // const { error: deleteError } = await supabase.from('scores').delete().eq('domain_url', domain);
+                // if (deleteError) console.error("Error deleting from scores table:", deleteError);
+
+            } else { // Still less than 10 increments
+                const newAverage = ((score_average * increment) + score) / newIncrement;
+                const { error: updateError } = await supabase
+                    .from('scores')
+                    .update({
+                        increment: newIncrement,
+                        score_average: newAverage
+                    })
+                    .eq('domain_url', domain);
+                if (updateError) { console.error("Error updating scores table:", updateError); throw updateError; }
+            }
+        }
+    } catch (dbError) {
+        console.error("Database operation failed in handleLogUnreliableDomain:", dbError);
+        throw dbError; // Re-throw to be caught by the onMessage listener's catch block
     }
 }
+
+console.log("Background script loaded.");
