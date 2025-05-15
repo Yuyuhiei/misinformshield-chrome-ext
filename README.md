@@ -83,6 +83,6 @@ To set up and run the MisinformShield extension locally:
 5.  Hover over highlighted text on the page for explanations.
 
 ## Authors
-![@yuyuhiei](https://github.com/Yuyuhiei)
-![@lanseudesu](https://github.com/lanseudesu)
-![@zumeragi](https://github.com/zumeragi)
+[@yuyuhiei](https://github.com/Yuyuhiei)
+[@lanseudesu](https://github.com/lanseudesu)
+[@zumeragi](https://github.com/zumeragi)
