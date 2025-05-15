@@ -1,8 +1,6 @@
 // popup/popup.js
 
 // DOM Elements for new UI (Slider and single scan button)
-const scanSensitivitySlider = document.getElementById('scanSensitivity');
-const scanSensitivityLabel = document.getElementById('scanSensitivityLabel');
 const startScanButton = document.getElementById('startScanButton');
 
 // Main Views & Navigation
@@ -30,11 +28,6 @@ const infoSeparator = document.getElementById('infoSeparator');
 const apiKeySeparator = document.getElementById('apiKeySeparator');
 
 // Sensitivity levels mapping
-const SENSITIVITY_LEVELS = {
-    1: { name: "Light Scan", value: "light", gradient: "linear-gradient(to right, #6EE7B7, #34D399)", trackClass: "light-scan-track" },
-    2: { name: "Medium Scan", value: "medium", gradient: "linear-gradient(to right, #FCD34D, #FBBF24)", trackClass: "medium-scan-track" },
-    3: { name: "Deep Scan", value: "deep", gradient: "linear-gradient(to right, #F87171, #EF4444)", trackClass: "deep-scan-track" }
-};
 
 // --- Initialize UI and Event Listeners ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -76,12 +69,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    if (scanSensitivitySlider) updateSliderAppearance(scanSensitivitySlider.value);
 
     if(toggleApiKeyButton) toggleApiKeyButton.addEventListener('click', toggleApiKeyInputArea);
     if(toggleInfoButton) toggleInfoButton.addEventListener('click', toggleInfoArea);
     if(saveApiKeyButton) saveApiKeyButton.addEventListener('click', saveApiKey);
-    if(scanSensitivitySlider) scanSensitivitySlider.addEventListener('input', (event) => updateSliderAppearance(event.target.value));
     if(startScanButton) startScanButton.addEventListener('click', handleStartScan);
     
     if(openDomainsPageButton) {
@@ -93,10 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function handleStartScan() {
-    if (!scanSensitivitySlider) return;
-    const sensitivityValue = scanSensitivitySlider.value;
-    const selectedSensitivity = SENSITIVITY_LEVELS[sensitivityValue]?.value || "light";
-    console.log(`Popup.js: Start Scan button clicked. Sensitivity: ${selectedSensitivity}`);
+    console.log(`Popup.js: Start Scan button clicked. Sensitivity: deep`);
     
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (chrome.runtime.lastError || !tabs || !tabs[0]) {
@@ -106,7 +94,7 @@ function handleStartScan() {
         const currentTabUrl = tabs[0].url;
         clearResults(true, currentTabUrl); // Clear previous results and highlights on the current page
         showLoading(true);
-        analyzeTextQuery(selectedSensitivity);
+        analyzeTextQuery("deep"); // Always use deep scan
     });
 }
 
@@ -167,16 +155,6 @@ function saveApiKey() {
 }
 
 // --- Slider UI Update Function --- 
-function updateSliderAppearance(value) { 
-    if(!scanSensitivityLabel || !scanSensitivitySlider) return;
-    const level = SENSITIVITY_LEVELS[value];
-    if (level) {
-        scanSensitivityLabel.textContent = level.name;
-        scanSensitivityLabel.style.backgroundImage = level.gradient;
-        scanSensitivitySlider.classList.remove('light-scan-track', 'medium-scan-track', 'deep-scan-track');
-        scanSensitivitySlider.classList.add(level.trackClass);
-    }
-}
 
 // --- Analysis Logic --- 
 function analyzeTextQuery(sens) {
@@ -297,8 +275,7 @@ function savePopupState(tabId) {
         progressBarWidth: progressBarDiv ? progressBarDiv.style.width : null,
         progressBarClassName: progressBarDiv ? progressBarDiv.className : null,
         resultsDisplay: resultsDiv ? resultsDiv.style.display : null,
-        errorText: errorP ? errorP.textContent : null,
-        sliderValue: scanSensitivitySlider ? scanSensitivitySlider.value : "1"
+        errorText: errorP ? errorP.textContent : null
     };
     chrome.storage.local.set({ [`popupState_${tabId}`]: state }, () => {
         if (chrome.runtime.lastError) console.error("Popup.js: Error saving popup state:", chrome.runtime.lastError.message);
@@ -336,11 +313,6 @@ function restorePopupState(tabId) {
         if (resultsDiv) resultsDiv.style.display = state.resultsDisplay || 'none';
         if (errorP) errorP.textContent = state.errorText || '';
 
-        if (scanSensitivitySlider) {
-            scanSensitivitySlider.value = state.sliderValue || "1";
-            updateSliderAppearance(scanSensitivitySlider.value);
-        }
-        
         if (startScanButton && apiKeyStatus) {
             const apiKeyIsSet = apiKeyStatus.className.includes('success');
             startScanButton.disabled = !apiKeyIsSet;
@@ -404,7 +376,6 @@ function displayScoreBar(score, domainInfo) {
 function showLoading(isLoading) { 
     if(loadingIndicator) loadingIndicator.style.display = isLoading ? 'flex' : 'none';
     if (startScanButton) startScanButton.disabled = isLoading;
-    if (scanSensitivitySlider) scanSensitivitySlider.disabled = isLoading;
 }
 function showError(message) { 
     if (resultsDiv) resultsDiv.style.display = 'none';
